@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Generator</title>
+    <meta name="description" content="Deterministic password generator - nothing stored, runs locally">
+    <meta name="theme-color" content="#0a0a0b">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <style>
+        /* Using system fonts for true offline capability */
+        :root {
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            background: #0a0a0b;
+            color: #e4e4e7;
+            font-family: var(--font-sans);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background-image: 
+                radial-gradient(ellipse at 20% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 440px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 0.875rem;
+            color: #71717a;
+        }
+
+        .card {
+            background: rgba(24, 24, 27, 0.8);
+            border: 1px solid rgba(63, 63, 70, 0.5);
+            border-radius: 16px;
+            padding: 32px;
+            backdrop-filter: blur(12px);
+        }
+
+        .field {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #a1a1aa;
+            margin-bottom: 8px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"] {
+            width: 100%;
+            padding: 14px 16px;
+            background: #09090b;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            color: #fafafa;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+        }
+
+        input::placeholder {
+            color: #3f3f46;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-wrapper input {
+            padding-right: 48px;
+        }
+
+        .toggle-btn {
+            position: absolute;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            padding: 6px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #71717a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .toggle-btn:hover {
+            color: #a1a1aa;
+            background: rgba(255, 255, 255, 0.05);
+            transform: none;
+            box-shadow: none;
+        }
+
+        .match-indicator {
+            position: absolute;
+            right: 16px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .match-indicator.match {
+            color: #10b981;
+        }
+
+        .match-indicator.no-match {
+            color: #ef4444;
+        }
+
+        /* Master Secret Strength Meter */
+        .master-strength {
+            margin-top: 8px;
+            display: none;
+        }
+
+        .master-strength.visible {
+            display: block;
+        }
+
+        .master-strength-bar-bg {
+            height: 4px;
+            background: #27272a;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+
+        .master-strength-bar {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s ease, background 0.3s ease;
+            width: 0%;
+        }
+
+        .master-strength-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7rem;
+        }
+
+        .master-strength-label {
+            font-weight: 600;
+        }
+
+        .master-strength-tip {
+            color: #71717a;
+        }
+
+        .strength-weak { background: #ef4444; }
+        .strength-fair { background: #f59e0b; }
+        .strength-good { background: #10b981; }
+        .strength-strong { background: #8b5cf6; }
+
+        .strength-weak-text { color: #ef4444; }
+        .strength-fair-text { color: #f59e0b; }
+        .strength-good-text { color: #10b981; }
+        .strength-strong-text { color: #8b5cf6; }
+
+        .star-btn {
+            position: absolute;
+            right: 12px;
+            width: 32px;
+            height: 32px;
+            padding: 6px;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            color: #71717a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .star-btn:hover {
+            color: #fbbf24;
+            background: rgba(251, 191, 36, 0.1);
+            transform: none;
+            box-shadow: none;
+        }
+
+        .star-btn.saved {
+            color: #fbbf24;
+        }
+
+        .star-btn.out-of-sync {
+            color: #fbbf24;
+            opacity: 0.5;
+        }
+
+        .star-btn.out-of-sync:hover {
+            opacity: 1;
+        }
+
+        .star-btn .sync-dot {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 8px;
+            height: 8px;
+            background: #f97316;
+            border-radius: 50%;
+            display: none;
+        }
+
+        .star-btn.out-of-sync .sync-dot {
+            display: block;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .row .field {
+            flex: 1;
+        }
+
+        input[type="number"] {
+            text-align: center;
+        }
+
+        .options {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+
+        .option {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+        }
+
+        .option:hover {
+            border-color: #3f3f46;
+        }
+
+        .option input {
+            accent-color: #10b981;
+            cursor: pointer;
+        }
+
+        .option span {
+            text-transform: none;
+        }
+
+        /* Entropy Meter Styles */
+        .entropy-container {
+            margin-bottom: 24px;
+        }
+
+        .entropy-bar-bg {
+            height: 6px;
+            background: #27272a;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .entropy-bar {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease, background 0.3s ease;
+            width: 0%;
+        }
+
+        .entropy-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+        }
+
+        .entropy-bits {
+            color: #a1a1aa;
+            font-family: var(--font-mono);
+        }
+
+        .entropy-label {
+            font-weight: 600;
+        }
+
+        .entropy-weak { background: #ef4444; }
+        .entropy-fair { background: #f59e0b; }
+        .entropy-good { background: #10b981; }
+        .entropy-strong { background: #8b5cf6; }
+
+        .entropy-weak-text { color: #ef4444; }
+        .entropy-fair-text { color: #f59e0b; }
+        .entropy-good-text { color: #10b981; }
+        .entropy-strong-text { color: #8b5cf6; }
+
+        button {
+            padding: 16px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: none;
+            border-radius: 10px;
+            color: #fff;
+            font-family: var(--font-sans);
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .button-row {
+            display: flex;
+            gap: 12px;
+        }
+
+        .generate-btn {
+            flex: 1;
+        }
+
+        .clear-btn {
+            background: #27272a;
+            padding: 16px 20px;
+        }
+
+        .clear-btn:hover {
+            background: #3f3f46;
+            box-shadow: none;
+        }
+
+        .output {
+            margin-top: 24px;
+            padding: 20px;
+            background: #09090b;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .output.visible {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .output-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #10b981;
+            margin-bottom: 12px;
+        }
+
+        .password-display {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .password-text {
+            flex: 1;
+            font-family: var(--font-mono);
+            font-size: 1.125rem;
+            word-break: break-all;
+            line-height: 1.5;
+        }
+
+        .copy-btn {
+            width: auto;
+            padding: 10px 16px;
+            background: #27272a;
+            font-size: 0.875rem;
+            flex-shrink: 0;
+        }
+
+        .copy-btn:hover {
+            background: #3f3f46;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .copied {
+            background: #10b981 !important;
+        }
+
+        /* Loading spinner */
+        .generate-btn {
+            position: relative;
+        }
+
+        .generate-btn.loading {
+            color: transparent;
+            pointer-events: none;
+        }
+
+        .generate-btn.loading::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            top: 50%;
+            left: 50%;
+            margin-left: -10px;
+            margin-top: -10px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 8px;
+            padding: 8px;
+            cursor: pointer;
+            color: #a1a1aa;
+            transition: all 0.2s;
+        }
+
+        .theme-toggle:hover {
+            background: #27272a;
+            color: #e4e4e7;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Light mode */
+        body.light {
+            background: #f4f4f5;
+            color: #18181b;
+            background-image: 
+                radial-gradient(ellipse at 20% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
+        }
+
+        body.light .card {
+            background: rgba(255, 255, 255, 0.9);
+            border-color: #e4e4e7;
+        }
+
+        body.light input[type="text"],
+        body.light input[type="password"],
+        body.light input[type="number"] {
+            background: #fff;
+            border-color: #d4d4d8;
+            color: #18181b;
+        }
+
+        body.light input::placeholder {
+            color: #a1a1aa;
+        }
+
+        body.light .option {
+            background: #f4f4f5;
+            border-color: #e4e4e7;
+        }
+
+        body.light .output {
+            background: #fff;
+            border-color: #e4e4e7;
+        }
+
+        body.light .clear-btn,
+        body.light .copy-btn {
+            background: #e4e4e7;
+            color: #18181b;
+        }
+
+        body.light .clear-btn:hover,
+        body.light .copy-btn:hover {
+            background: #d4d4d8;
+        }
+
+        body.light .theme-toggle {
+            background: #fff;
+            border-color: #e4e4e7;
+            color: #71717a;
+        }
+
+        body.light .theme-toggle:hover {
+            background: #f4f4f5;
+            color: #18181b;
+        }
+
+        body.light .entropy-bar-bg {
+            background: #e4e4e7;
+        }
+
+        body.light .footer {
+            color: #71717a;
+        }
+
+        body.light .how-it-works {
+            background: #fff;
+            border-color: #e4e4e7;
+        }
+
+        body.light .how-it-works-content {
+            color: #52525b;
+        }
+
+        /* How it works section */
+        .how-it-works {
+            margin-top: 24px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .how-it-works-header {
+            padding: 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #a1a1aa;
+            transition: color 0.2s;
+        }
+
+        .how-it-works-header:hover {
+            color: #e4e4e7;
+        }
+
+        .how-it-works-arrow {
+            transition: transform 0.2s;
+        }
+
+        .how-it-works.open .how-it-works-arrow {
+            transform: rotate(180deg);
+        }
+
+        .how-it-works-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .how-it-works.open .how-it-works-content {
+            max-height: 400px;
+        }
+
+        .how-it-works-inner {
+            padding: 0 16px 16px;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+            color: #71717a;
+        }
+
+        .how-it-works-inner p {
+            margin-bottom: 12px;
+        }
+
+        .how-it-works-inner p:last-child {
+            margin-bottom: 0;
+        }
+
+        .how-it-works-inner strong {
+            color: #a1a1aa;
+        }
+
+        body.light .how-it-works-inner strong {
+            color: #52525b;
+        }
+
+        /* My Sites section */
+        .my-sites {
+            margin-top: 16px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .my-sites-header {
+            padding: 16px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #a1a1aa;
+            transition: color 0.2s;
+        }
+
+        .my-sites-header:hover {
+            color: #e4e4e7;
+        }
+
+        .my-sites-count {
+            background: #27272a;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75rem;
+        }
+
+        .my-sites-arrow {
+            transition: transform 0.2s;
+        }
+
+        .my-sites.open .my-sites-arrow {
+            transform: rotate(180deg);
+        }
+
+        .my-sites-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .my-sites.open .my-sites-content {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .my-sites-list {
+            padding: 0 8px 8px;
+        }
+
+        .my-sites-empty {
+            padding: 16px;
+            text-align: center;
+            color: #52525b;
+            font-size: 0.8125rem;
+        }
+
+        .site-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            margin-bottom: 4px;
+            background: #09090b;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .site-item:hover {
+            background: #27272a;
+        }
+
+        .site-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .site-name {
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            color: #e4e4e7;
+        }
+
+        .site-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .site-settings {
+            font-size: 0.7rem;
+            color: #52525b;
+            margin-top: 2px;
+        }
+
+        .site-delete {
+            background: none;
+            border: none;
+            color: #52525b;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: color 0.2s, background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .site-delete:hover {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            transform: none;
+            box-shadow: none;
+        }
+
+        body.light .my-sites {
+            background: #fff;
+            border-color: #e4e4e7;
+        }
+
+        body.light .my-sites-count {
+            background: #e4e4e7;
+        }
+
+        body.light .site-item {
+            background: #f4f4f5;
+        }
+
+        body.light .site-item:hover {
+            background: #e4e4e7;
+        }
+
+        body.light .site-name {
+            color: #18181b;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 0.75rem;
+            color: #52525b;
+        }
+
+        .install-prompt {
+            display: none;
+            margin-top: 12px;
+        }
+
+        .install-btn {
+            padding: 8px 16px;
+            background: #18181b;
+            border: 1px solid #27272a;
+            color: #a1a1aa;
+            font-size: 0.75rem;
+        }
+
+        .install-btn:hover {
+            background: #27272a;
+            color: #e4e4e7;
+        }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+        <svg id="theme-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="theme-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+    </button>
+
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Password Generator</h1>
+            <p>Deterministic · Nothing stored · Runs locally</p>
+        </div>
+
+        <div class="card">
+            <div class="field">
+                <label>Master Secret</label>
+                <div class="input-wrapper">
+                    <input type="password" id="master" placeholder="Your secret keyword" autocomplete="off">
+                    <button type="button" class="toggle-btn" onclick="toggleMaster()" aria-label="Toggle password visibility">
+                        <svg id="eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <svg id="eye-closed" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                        </svg>
+                    </button>
+                </div>
+                <div class="master-strength" id="masterStrength">
+                    <div class="master-strength-bar-bg">
+                        <div class="master-strength-bar" id="masterStrengthBar"></div>
+                    </div>
+                    <div class="master-strength-info">
+                        <span class="master-strength-label" id="masterStrengthLabel"></span>
+                        <span class="master-strength-tip" id="masterStrengthTip"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Confirm Master Secret</label>
+                <div class="input-wrapper">
+                    <input type="password" id="masterConfirm" placeholder="Confirm your secret" autocomplete="off">
+                    <span class="match-indicator" id="matchIndicator"></span>
+                </div>
+            </div>
+
+            <div class="field">
+                <label>Site / Label (optional)</label>
+                <div class="input-wrapper">
+                    <input type="text" id="site" placeholder="e.g., gmail.com">
+                    <button type="button" class="star-btn" id="starBtn" onclick="toggleSaveSite()" aria-label="Save site">
+                        <svg id="star-outline" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                        <svg id="star-filled" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                        </svg>
+                        <span class="sync-dot"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="field">
+                    <label>Length</label>
+                    <input type="number" id="length" value="20" min="8" max="64">
+                </div>
+            </div>
+
+            <label>Include</label>
+            <div class="options">
+                <label class="option">
+                    <input type="checkbox" id="lowercase" checked>
+                    <span>a-z</span>
+                </label>
+                <label class="option">
+                    <input type="checkbox" id="uppercase" checked>
+                    <span>A-Z</span>
+                </label>
+                <label class="option">
+                    <input type="checkbox" id="numbers" checked>
+                    <span>0-9</span>
+                </label>
+                <label class="option">
+                    <input type="checkbox" id="symbols" checked>
+                    <span>!@#$</span>
+                </label>
+            </div>
+
+            <!-- Entropy Meter -->
+            <div class="entropy-container">
+                <label>Strength</label>
+                <div class="entropy-bar-bg">
+                    <div class="entropy-bar" id="entropyBar"></div>
+                </div>
+                <div class="entropy-info">
+                    <span class="entropy-bits" id="entropyBits">131 bits</span>
+                    <span class="entropy-label" id="entropyLabel">Strong</span>
+                </div>
+            </div>
+
+            <label>Security</label>
+            <div class="options">
+                <label class="option">
+                    <input type="checkbox" id="autoClear" checked>
+                    <span>Auto-clear after copy</span>
+                </label>
+            </div>
+
+            <div class="button-row">
+                <button class="generate-btn" onclick="generate()">Generate Password</button>
+                <button class="clear-btn" onclick="clearAll()">Clear All</button>
+            </div>
+
+            <div class="output" id="output">
+                <div class="output-label">Your Password</div>
+                <div class="password-display">
+                    <span class="password-text" id="password"></span>
+                    <button class="copy-btn" onclick="copyPassword()">Copy</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            All processing happens in your browser · v1.0
+            <div class="install-prompt" id="installPrompt">
+                <button class="install-btn" onclick="installPWA()">Install as App</button>
+            </div>
+        </div>
+
+        <div class="how-it-works" id="howItWorks">
+            <div class="how-it-works-header" onclick="toggleHowItWorks()">
+                <span>How it works</span>
+                <svg class="how-it-works-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </div>
+            <div class="how-it-works-content">
+                <div class="how-it-works-inner">
+                    <p><strong>No passwords are stored.</strong> Your password is generated on-the-fly using your master secret and site name as inputs.</p>
+                    <p><strong>Deterministic generation:</strong> Same inputs always produce the same password. Forget it? Just regenerate it.</p>
+                    <p><strong>PBKDF2-SHA256</strong> with 1,000,000 iterations makes brute-force attacks extremely slow and costly.</p>
+                    <p><strong>100% local:</strong> Nothing leaves your browser. No servers, no tracking, no data collection.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="my-sites" id="mySites">
+            <div class="my-sites-header" onclick="toggleMySites()">
+                <span>My Sites <span class="my-sites-count" id="sitesCount">0</span></span>
+                <svg class="my-sites-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </div>
+            <div class="my-sites-content">
+                <div class="my-sites-list" id="sitesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Theme toggle
+        function toggleTheme() {
+            const body = document.body;
+            const sun = document.getElementById('theme-sun');
+            const moon = document.getElementById('theme-moon');
+            
+            body.classList.toggle('light');
+            const isLight = body.classList.contains('light');
+            
+            sun.style.display = isLight ? 'none' : 'block';
+            moon.style.display = isLight ? 'block' : 'none';
+            
+            localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        }
+
+        // Load saved theme
+        (function() {
+            const saved = localStorage.getItem('theme');
+            if (saved === 'light') {
+                document.body.classList.add('light');
+                document.getElementById('theme-sun').style.display = 'none';
+                document.getElementById('theme-moon').style.display = 'block';
+            }
+        })();
+
+        // How it works toggle
+        function toggleHowItWorks() {
+            document.getElementById('howItWorks').classList.toggle('open');
+        }
+
+        // Site name normalization
+        function normalizeSite(value) {
+            return value.toLowerCase().trim();
+        }
+
+        // Site name normalization is handled in the My Sites section
+
+        function toggleMaster() {
+            const input = document.getElementById('master');
+            const eyeOpen = document.getElementById('eye-open');
+            const eyeClosed = document.getElementById('eye-closed');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                eyeOpen.style.display = 'none';
+                eyeClosed.style.display = 'block';
+            } else {
+                input.type = 'password';
+                eyeOpen.style.display = 'block';
+                eyeClosed.style.display = 'none';
+            }
+        }
+
+        function getCharsetSize() {
+            let size = 0;
+            if (document.getElementById('lowercase').checked) size += 26;
+            if (document.getElementById('uppercase').checked) size += 26;
+            if (document.getElementById('numbers').checked) size += 10;
+            if (document.getElementById('symbols').checked) size += 28;
+            return size;
+        }
+
+        function updateEntropy() {
+            const length = parseInt(document.getElementById('length').value) || 20;
+            const charsetSize = getCharsetSize();
+            
+            if (charsetSize === 0) {
+                document.getElementById('entropyBits').textContent = '0 bits';
+                document.getElementById('entropyLabel').textContent = 'Invalid';
+                document.getElementById('entropyBar').style.width = '0%';
+                return;
+            }
+
+            // Entropy = length * log2(charset_size)
+            const entropy = Math.floor(length * Math.log2(charsetSize));
+            
+            const bar = document.getElementById('entropyBar');
+            const bitsLabel = document.getElementById('entropyBits');
+            const strengthLabel = document.getElementById('entropyLabel');
+
+            bitsLabel.textContent = entropy + ' bits';
+
+            // Remove all classes
+            bar.className = 'entropy-bar';
+            strengthLabel.className = 'entropy-label';
+
+            // Determine strength level
+            let strength, barClass, percentage;
+            if (entropy < 40) {
+                strength = 'Weak';
+                barClass = 'entropy-weak';
+                percentage = Math.min((entropy / 40) * 25, 25);
+            } else if (entropy < 64) {
+                strength = 'Fair';
+                barClass = 'entropy-fair';
+                percentage = 25 + ((entropy - 40) / 24) * 25;
+            } else if (entropy < 100) {
+                strength = 'Good';
+                barClass = 'entropy-good';
+                percentage = 50 + ((entropy - 64) / 36) * 25;
+            } else {
+                strength = 'Strong';
+                barClass = 'entropy-strong';
+                percentage = Math.min(75 + ((entropy - 100) / 50) * 25, 100);
+            }
+
+            bar.classList.add(barClass);
+            bar.style.width = percentage + '%';
+            strengthLabel.textContent = strength;
+            strengthLabel.classList.add(barClass + '-text');
+        }
+
+        // Update entropy when length changes
+        document.getElementById('length').addEventListener('input', updateEntropy);
+
+        async function generate() {
+            const master = document.getElementById('master').value;
+            const masterConfirm = document.getElementById('masterConfirm').value;
+            const site = normalizeSite(document.getElementById('site').value);
+            const length = parseInt(document.getElementById('length').value) || 20;
+            const iterations = 1000000; // PBKDF2 iterations - v1 launch config
+            const btn = document.querySelector('.generate-btn');
+
+            // Update site field with normalized value
+            document.getElementById('site').value = site;
+
+            if (!master) {
+                alert('Please enter a master secret');
+                return;
+            }
+
+            if (master !== masterConfirm) {
+                alert('Master secrets do not match');
+                return;
+            }
+
+            // Show loading spinner
+            btn.classList.add('loading');
+
+            // Build character set
+            let charset = '';
+            if (document.getElementById('lowercase').checked) charset += 'abcdefghijklmnopqrstuvwxyz';
+            if (document.getElementById('uppercase').checked) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            if (document.getElementById('numbers').checked) charset += '0123456789';
+            if (document.getElementById('symbols').checked) charset += '!@#$%^&*()_+-=[]{}|;:,.<>?';
+
+            if (!charset) {
+                alert('Please select at least one character type');
+                return;
+            }
+
+            const encoder = new TextEncoder();
+            
+            // Create salt from site + charset + length
+            const saltString = 'v1|' + site + '|' + length + '|' + charset;
+            const salt = encoder.encode(saltString);
+
+            // Import master secret as a key
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(master),
+                'PBKDF2',
+                false,
+                ['deriveBits']
+            );
+
+            // Calculate how many bits we need - extra for rejection sampling
+            const bitsNeeded = Math.max(512, length * 16);
+
+            // Derive bits using PBKDF2
+            const derivedBits = await crypto.subtle.deriveBits(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: iterations,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                bitsNeeded
+            );
+
+            let hashArray = new Uint8Array(derivedBits);
+
+            // Generate password using rejection sampling to avoid modulo bias
+            let password = '';
+            let byteIndex = 0;
+            let derivationCounter = 0;
+            
+            const maxFairByte = 256 - (256 % charset.length);
+
+            while (password.length < length) {
+                if (byteIndex >= hashArray.length) {
+                    derivationCounter++;
+                    const extraSalt = encoder.encode(saltString + '|' + derivationCounter);
+                    const extraBits = await crypto.subtle.deriveBits(
+                        {
+                            name: 'PBKDF2',
+                            salt: extraSalt,
+                            iterations: iterations,
+                            hash: 'SHA-256'
+                        },
+                        keyMaterial,
+                        512
+                    );
+                    hashArray = new Uint8Array(extraBits);
+                    byteIndex = 0;
+                }
+
+                const byte = hashArray[byteIndex++];
+                
+                // Rejection sampling: only use bytes in the fair range
+                if (byte < maxFairByte) {
+                    password += charset[byte % charset.length];
+                }
+            }
+
+            document.getElementById('password').textContent = password;
+            document.getElementById('output').classList.add('visible');
+
+            // Hide loading spinner
+            btn.classList.remove('loading');
+        }
+
+        function copyPassword() {
+            const password = document.getElementById('password').textContent;
+            const autoClear = document.getElementById('autoClear').checked;
+            const btn = document.querySelector('.copy-btn');
+            
+            const doCopy = async () => {
+                try {
+                    await navigator.clipboard.writeText(password);
+                    return true;
+                } catch (err) {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = password;
+                    textarea.style.position = 'fixed';
+                    textarea.style.opacity = '0';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    try {
+                        document.execCommand('copy');
+                        return true;
+                    } catch (e) {
+                        return false;
+                    } finally {
+                        document.body.removeChild(textarea);
+                    }
+                }
+            };
+            
+            doCopy().then((success) => {
+                if (success) {
+                    btn.textContent = 'Copied!';
+                    btn.classList.add('copied');
+                } else {
+                    btn.textContent = 'Failed';
+                }
+                
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.classList.remove('copied');
+                    
+                    if (autoClear && success) {
+                        document.getElementById('master').value = '';
+                        document.getElementById('masterConfirm').value = '';
+                        document.getElementById('site').value = '';
+                        document.getElementById('password').textContent = '';
+                        document.getElementById('output').classList.remove('visible');
+                        updateMatchIndicator();
+                        document.getElementById('masterStrength').classList.remove('visible');
+                    }
+                }, 1500);
+            });
+        }
+
+        function clearAll() {
+            document.getElementById('master').value = '';
+            document.getElementById('masterConfirm').value = '';
+            document.getElementById('site').value = '';
+            document.getElementById('length').value = '20';
+            document.getElementById('password').textContent = '';
+            document.getElementById('output').classList.remove('visible');
+            
+            document.getElementById('lowercase').checked = true;
+            document.getElementById('uppercase').checked = true;
+            document.getElementById('numbers').checked = true;
+            document.getElementById('symbols').checked = true;
+            document.getElementById('autoClear').checked = true;
+            
+            const input = document.getElementById('master');
+            const eyeOpen = document.getElementById('eye-open');
+            const eyeClosed = document.getElementById('eye-closed');
+            input.type = 'password';
+            eyeOpen.style.display = 'block';
+            eyeClosed.style.display = 'none';
+
+            // Reset entropy meter
+            updateEntropy();
+
+            // Reset match indicator
+            updateMatchIndicator();
+
+            // Reset master strength meter
+            document.getElementById('masterStrength').classList.remove('visible');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                generate();
+            }
+        });
+
+        ['lowercase', 'uppercase', 'numbers', 'symbols'].forEach(id => {
+            document.getElementById(id).addEventListener('change', function() {
+                const checked = ['lowercase', 'uppercase', 'numbers', 'symbols']
+                    .filter(i => document.getElementById(i).checked);
+                if (checked.length === 0) {
+                    this.checked = true;
+                }
+                updateEntropy();
+            });
+        });
+
+        // Initialize entropy meter on page load
+        updateEntropy();
+
+        // Real-time match indicator for master secret confirmation
+        // Common passwords list (top 100 most common)
+        const commonPasswords = [
+            'password', '123456', '12345678', 'qwerty', 'abc123', 'monkey', 'master',
+            'dragon', '111111', 'baseball', 'iloveyou', 'trustno1', 'sunshine',
+            'princess', 'welcome', 'shadow', 'superman', 'michael', 'football',
+            'password1', 'password123', 'batman', 'login', 'admin', 'letmein',
+            'qwerty123', 'solo', 'passw0rd', 'starwars', 'hello', 'freedom',
+            'whatever', 'qazwsx', 'secret', 'password!', 'google', 'zaq1zaq1',
+            '123456789', '1234567890', '1234567', '12345', '123123', '000000',
+            '1111111', '1234', 'azerty', 'access', 'mustang', 'ashley', 'hunter',
+            'jennifer', 'nicole', 'jordan', 'jessica', 'thomas', 'joshua', 'pepper',
+            'love', 'amanda', 'andrew', 'killer', 'charlie', 'soccer', 'summer',
+            'ranger', 'pass', 'buster', 'george', 'merlin', 'asshole', 'ginger',
+            'thunder', 'maggie', 'mickey', 'cheese', 'test', 'cookie', 'tiger',
+            'robert', 'daniel', 'david', 'magic', 'computer', 'nothing', 'orange',
+            'winner', 'chicken', 'silver', 'flower', 'matrix', 'diamond', 'yellow'
+        ];
+
+        function checkMasterStrength(password) {
+            if (!password) {
+                return { score: 0, label: '', tip: '', class: '' };
+            }
+
+            let score = 0;
+            let tips = [];
+
+            // Length scoring
+            if (password.length >= 8) score += 1;
+            if (password.length >= 12) score += 1;
+            if (password.length >= 16) score += 1;
+            if (password.length >= 20) score += 1;
+            if (password.length < 8) tips.push('Use 8+ characters');
+
+            // Character variety
+            const hasLower = /[a-z]/.test(password);
+            const hasUpper = /[A-Z]/.test(password);
+            const hasNumber = /[0-9]/.test(password);
+            const hasSymbol = /[^a-zA-Z0-9]/.test(password);
+
+            const variety = [hasLower, hasUpper, hasNumber, hasSymbol].filter(Boolean).length;
+            score += variety;
+
+            if (!hasUpper && hasLower) tips.push('Add uppercase');
+            if (!hasNumber) tips.push('Add numbers');
+            if (!hasSymbol) tips.push('Add symbols');
+
+            // Common password check
+            if (commonPasswords.includes(password.toLowerCase())) {
+                score = Math.min(score, 1);
+                tips = ['This is a common password'];
+            }
+
+            // Pattern detection
+            const hasRepeat = /(.)\1{2,}/.test(password);
+            const hasSequence = /(012|123|234|345|456|567|678|789|890|abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz)/i.test(password);
+            const hasKeyboardSeq = /(qwerty|asdf|zxcv|qazwsx)/i.test(password);
+
+            if (hasRepeat || hasSequence || hasKeyboardSeq) {
+                score = Math.max(score - 2, 1);
+                if (tips.length === 0) tips.push('Avoid patterns');
+            }
+
+            // Determine strength level
+            let label, barClass;
+            if (score <= 2) {
+                label = 'Weak';
+                barClass = 'strength-weak';
+            } else if (score <= 4) {
+                label = 'Fair';
+                barClass = 'strength-fair';
+            } else if (score <= 6) {
+                label = 'Good';
+                barClass = 'strength-good';
+            } else {
+                label = 'Strong';
+                barClass = 'strength-strong';
+            }
+
+            const percentage = Math.min((score / 8) * 100, 100);
+
+            return {
+                score,
+                label,
+                tip: tips[0] || '',
+                class: barClass,
+                percentage
+            };
+        }
+
+        function updateMasterStrength() {
+            const password = document.getElementById('master').value;
+            const container = document.getElementById('masterStrength');
+            const bar = document.getElementById('masterStrengthBar');
+            const label = document.getElementById('masterStrengthLabel');
+            const tip = document.getElementById('masterStrengthTip');
+
+            if (!password) {
+                container.classList.remove('visible');
+                return;
+            }
+
+            container.classList.add('visible');
+            const strength = checkMasterStrength(password);
+
+            bar.className = 'master-strength-bar ' + strength.class;
+            bar.style.width = strength.percentage + '%';
+            label.className = 'master-strength-label ' + strength.class + '-text';
+            label.textContent = strength.label;
+            tip.textContent = strength.tip;
+        }
+
+        document.getElementById('master').addEventListener('input', updateMasterStrength);
+
+        function updateMatchIndicator() {
+            const master = document.getElementById('master').value;
+            const masterConfirm = document.getElementById('masterConfirm').value;
+            const indicator = document.getElementById('matchIndicator');
+            
+            if (!masterConfirm) {
+                indicator.textContent = '';
+                indicator.className = 'match-indicator';
+            } else if (master === masterConfirm) {
+                indicator.textContent = '✓ Match';
+                indicator.className = 'match-indicator match';
+            } else {
+                indicator.textContent = '✗ No match';
+                indicator.className = 'match-indicator no-match';
+            }
+        }
+
+        document.getElementById('master').addEventListener('input', updateMatchIndicator);
+        document.getElementById('masterConfirm').addEventListener('input', updateMatchIndicator);
+
+        // My Sites functionality
+        function getSavedSites() {
+            try {
+                const data = JSON.parse(localStorage.getItem('mySites') || '[]');
+                // Migrate old format (strings) to new format (objects)
+                return data.map(site => {
+                    if (typeof site === 'string') {
+                        return { name: site, length: 20, lowercase: true, uppercase: true, numbers: true, symbols: true };
+                    }
+                    return site;
+                }).filter(site => site && site.name); // Remove invalid entries
+            } catch {
+                return [];
+            }
+        }
+
+        // Clean up invalid data on load
+        (function() {
+            const sites = getSavedSites();
+            localStorage.setItem('mySites', JSON.stringify(sites));
+        })();
+
+        function getCurrentSettings() {
+            return {
+                length: parseInt(document.getElementById('length').value) || 20,
+                lowercase: document.getElementById('lowercase').checked,
+                uppercase: document.getElementById('uppercase').checked,
+                numbers: document.getElementById('numbers').checked,
+                symbols: document.getElementById('symbols').checked
+            };
+        }
+
+        function toggleSaveSite() {
+            const siteName = normalizeSite(document.getElementById('site').value);
+            if (!siteName) {
+                alert('Please enter a site name first');
+                return;
+            }
+
+            const sites = getSavedSites();
+            const existingIndex = sites.findIndex(s => s.name === siteName);
+            const starBtn = document.getElementById('starBtn');
+            const isOutOfSync = starBtn.classList.contains('out-of-sync');
+
+            if (existingIndex >= 0) {
+                if (isOutOfSync) {
+                    // Update existing site with new settings
+                    sites[existingIndex] = {
+                        name: siteName,
+                        ...getCurrentSettings()
+                    };
+                } else {
+                    // Remove if already saved and in sync
+                    sites.splice(existingIndex, 1);
+                }
+            } else {
+                // Add new site with settings
+                sites.unshift({
+                    name: siteName,
+                    ...getCurrentSettings()
+                });
+                // Keep max 50 sites
+                if (sites.length > 50) sites.pop();
+            }
+
+            localStorage.setItem('mySites', JSON.stringify(sites));
+            renderSitesList();
+            updateStarButton();
+        }
+
+        function settingsMatch(saved, current) {
+            return saved.length === current.length &&
+                   saved.lowercase === current.lowercase &&
+                   saved.uppercase === current.uppercase &&
+                   saved.numbers === current.numbers &&
+                   saved.symbols === current.symbols;
+        }
+
+        function updateStarButton() {
+            const siteName = normalizeSite(document.getElementById('site').value);
+            const sites = getSavedSites();
+            const savedSite = sites.find(s => s.name === siteName);
+            
+            const starBtn = document.getElementById('starBtn');
+            const starOutline = document.getElementById('star-outline');
+            const starFilled = document.getElementById('star-filled');
+
+            if (savedSite && siteName) {
+                const currentSettings = getCurrentSettings();
+                const isInSync = settingsMatch(savedSite, currentSettings);
+                
+                starBtn.classList.add('saved');
+                starOutline.style.display = 'none';
+                starFilled.style.display = 'block';
+                
+                if (isInSync) {
+                    starBtn.classList.remove('out-of-sync');
+                    starBtn.setAttribute('aria-label', 'Remove saved site');
+                    starBtn.setAttribute('title', 'Click to remove from saved sites');
+                } else {
+                    starBtn.classList.add('out-of-sync');
+                    starBtn.setAttribute('aria-label', 'Update saved site settings');
+                    starBtn.setAttribute('title', 'Settings changed - click to update');
+                }
+            } else {
+                starBtn.classList.remove('saved', 'out-of-sync');
+                starOutline.style.display = 'block';
+                starFilled.style.display = 'none';
+                starBtn.setAttribute('aria-label', 'Save site');
+                starBtn.setAttribute('title', 'Click to save site with current settings');
+            }
+        }
+
+        // Update star when site field changes
+        document.getElementById('site').addEventListener('input', updateStarButton);
+        document.getElementById('site').addEventListener('blur', function() {
+            this.value = normalizeSite(this.value);
+            updateStarButton();
+        });
+
+        // Update star when settings change
+        document.getElementById('length').addEventListener('input', updateStarButton);
+        ['lowercase', 'uppercase', 'numbers', 'symbols'].forEach(id => {
+            document.getElementById(id).addEventListener('change', updateStarButton);
+        });
+
+        function deleteSite(siteName, event) {
+            event.stopPropagation();
+            const sites = getSavedSites().filter(s => s.name !== siteName);
+            localStorage.setItem('mySites', JSON.stringify(sites));
+            renderSitesList();
+            updateStarButton();
+        }
+
+        function selectSite(site) {
+            // Restore site name
+            document.getElementById('site').value = site.name;
+            
+            // Restore settings
+            document.getElementById('length').value = site.length || 20;
+            document.getElementById('lowercase').checked = site.lowercase !== false;
+            document.getElementById('uppercase').checked = site.uppercase !== false;
+            document.getElementById('numbers').checked = site.numbers !== false;
+            document.getElementById('symbols').checked = site.symbols !== false;
+            
+            // Update UI
+            updateEntropy();
+            updateStarButton();
+            
+            // Focus master secret
+            document.getElementById('master').focus();
+        }
+
+        function toggleMySites() {
+            document.getElementById('mySites').classList.toggle('open');
+        }
+
+        function formatSettings(site) {
+            const parts = [];
+            parts.push(site.length + ' chars');
+            const chars = [];
+            if (site.lowercase !== false) chars.push('a-z');
+            if (site.uppercase !== false) chars.push('A-Z');
+            if (site.numbers !== false) chars.push('0-9');
+            if (site.symbols !== false) chars.push('!@#');
+            if (chars.length < 4) parts.push(chars.join(', '));
+            return parts.join(' · ');
+        }
+
+        function renderSitesList() {
+            const sites = getSavedSites();
+            const list = document.getElementById('sitesList');
+            const count = document.getElementById('sitesCount');
+            
+            count.textContent = sites.length;
+            
+            if (sites.length === 0) {
+                list.innerHTML = '<div class="my-sites-empty">No saved sites yet. Click the ⭐ next to a site name to save it.</div>';
+                return;
+            }
+            
+            list.innerHTML = sites.map((site, index) => {
+                if (!site || !site.name) return ''; // Skip invalid entries
+                const escapedName = site.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const siteJson = JSON.stringify(site).replace(/'/g, "\\'");
+                return `
+                    <div class="site-item" onclick='selectSite(${siteJson})'>
+                        <div class="site-info">
+                            <div class="site-name">${site.name}</div>
+                            <div class="site-settings">${formatSettings(site)}</div>
+                        </div>
+                        <button class="site-delete" onclick="deleteSite('${escapedName}', event)" aria-label="Delete site">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Initialize sites list on page load
+        renderSitesList();
+        updateStarButton();
+
+        // PWA Install prompt
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('installPrompt').style.display = 'block';
+        });
+
+        function installPWA() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choice) => {
+                    if (choice.outcome === 'accepted') {
+                        document.getElementById('installPrompt').style.display = 'none';
+                    }
+                    deferredPrompt = null;
+                });
+            }
+        }
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+    </script>
+</body>
+</html>
