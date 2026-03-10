@@ -1,14 +1,15 @@
-const CACHE_NAME = 'passgen-v1';
-const ASSETS = [
+var CACHE_NAME = 'passgen-v2';
+var ASSETS = [
   './',
   './index.html',
+  './app.js',
   './manifest.json'
 ];
 
 // Install: cache core assets
-self.addEventListener('install', (event) => {
+self.addEventListener('install', function (event) {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
+    caches.open(CACHE_NAME).then(function (cache) {
       return cache.addAll(ASSETS);
     })
   );
@@ -16,35 +17,32 @@ self.addEventListener('install', (event) => {
 });
 
 // Activate: clean up old caches
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', function (event) {
   event.waitUntil(
-    caches.keys().then((keys) => {
+    caches.keys().then(function (keys) {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME)
-            .map((key) => caches.delete(key))
+        keys.filter(function (key) { return key !== CACHE_NAME; })
+            .map(function (key) { return caches.delete(key); })
       );
     })
   );
   self.clients.claim();
 });
 
-// Fetch: serve from cache, fallback to network
-self.addEventListener('fetch', (event) => {
+// Fetch: network-first with cache fallback
+self.addEventListener('fetch', function (event) {
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      // Return cached version or fetch from network
-      return cached || fetch(event.request).then((response) => {
-        // Cache successful responses for future offline use
-        if (response.ok) {
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return response;
-      }).catch(() => {
-        // If both cache and network fail, return a basic offline message
-        // (only for navigation requests)
+    fetch(event.request).then(function (response) {
+      if (response.ok) {
+        var clone = response.clone();
+        caches.open(CACHE_NAME).then(function (cache) {
+          cache.put(event.request, clone);
+        });
+      }
+      return response;
+    }).catch(function () {
+      return caches.match(event.request).then(function (cached) {
+        if (cached) return cached;
         if (event.request.mode === 'navigate') {
           return new Response(
             '<!DOCTYPE html><html><body style="background:#0a0a0b;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h1>Offline</h1><p>Please check your connection</p></div></body></html>',
