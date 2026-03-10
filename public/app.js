@@ -54,7 +54,7 @@ function getCharsetSize() {
     if (document.getElementById('lowercase').checked) size += 26;
     if (document.getElementById('uppercase').checked) size += 26;
     if (document.getElementById('numbers').checked) size += 10;
-    if (document.getElementById('symbols').checked) size += 28;
+    if (document.getElementById('symbols').checked) size += 26;
     return size;
 }
 
@@ -109,10 +109,11 @@ async function generate() {
     var master = document.getElementById('master').value;
     var masterConfirm = document.getElementById('masterConfirm').value;
     var site = normalizeSite(document.getElementById('site').value);
-    var length = parseInt(document.getElementById('length').value) || 20;
+    var length = Math.min(64, Math.max(8, parseInt(document.getElementById('length').value) || 20));
     var iterations = 1000000;
     var btn = document.querySelector('.generate-btn');
 
+    document.getElementById('length').value = length;
     document.getElementById('site').value = site;
 
     if (!master) {
@@ -636,7 +637,7 @@ document.querySelector('.my-sites-header').addEventListener('click', toggleMySit
 document.getElementById('sitesList').addEventListener('click', handleSiteListClick);
 
 document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') generate();
+    if (e.key === 'Enter' && e.target.closest('.card')) generate();
 });
 
 document.getElementById('length').addEventListener('input', updateEntropy);
