@@ -1,21 +1,31 @@
 {
-  "name": "Password Generator",
+  "id": "./",
+  "name": "PassGen: Password Generator",
   "short_name": "PassGen",
-  "description": "Deterministic password generator - nothing stored, runs locally",
-  "start_url": ".",
+  "description": "Deterministic password generator. Same inputs, same password. Nothing leaves your device.",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#0a0a0b",
-  "theme_color": "#0a0a0b",
+  "background_color": "#fdf8f0",
+  "theme_color": "#fdf8f0",
   "icons": [
     {
       "src": "icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

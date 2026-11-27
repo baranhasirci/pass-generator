@@ -1,981 +1,210 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Password Generator</title>
-    <meta name="description" content="Deterministic password generator - nothing stored, runs locally">
-    <meta name="theme-color" content="#0a0a0b">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; manifest-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types passgen">
+    <meta name="referrer" content="no-referrer">
+    <title>PassGen · Deterministic Password Generator</title>
+    <meta name="description" content="Deterministic password generator. Same inputs, same password. Nothing leaves your device and no passwords are stored.">
+    <meta name="theme-color" content="#111c26">
+    <meta name="color-scheme" content="dark light">
     <link rel="manifest" href="manifest.json">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <style>
-        /* Using system fonts for true offline capability */
-        :root {
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            min-height: 100vh;
-            background: #0a0a0b;
-            color: #e4e4e7;
-            font-family: var(--font-sans);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            background-image: 
-                radial-gradient(ellipse at 20% 80%, rgba(16, 185, 129, 0.08) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
-        }
-
-        .container {
-            width: 100%;
-            max-width: 440px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-
-        .header h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            letter-spacing: -0.02em;
-            margin-bottom: 8px;
-        }
-
-        .header p {
-            font-size: 0.875rem;
-            color: #71717a;
-        }
-
-        .card {
-            background: rgba(24, 24, 27, 0.8);
-            border: 1px solid rgba(63, 63, 70, 0.5);
-            border-radius: 16px;
-            padding: 32px;
-            backdrop-filter: blur(12px);
-        }
-
-        .field {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #a1a1aa;
-            margin-bottom: 8px;
-        }
-
-        input[type="text"],
-        input[type="password"],
-        input[type="number"] {
-            width: 100%;
-            padding: 14px 16px;
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
-            color: #fafafa;
-            font-family: var(--font-mono);
-            font-size: 1rem;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: #10b981;
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-        }
-
-        input::placeholder {
-            color: #3f3f46;
-        }
-
-        .input-wrapper {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-
-        .input-wrapper input {
-            padding-right: 48px;
-        }
-
-        .toggle-btn {
-            position: absolute;
-            right: 12px;
-            width: 32px;
-            height: 32px;
-            padding: 6px;
-            background: transparent;
-            border: none;
-            border-radius: 6px;
-            color: #71717a;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: color 0.2s, background 0.2s;
-        }
-
-        .toggle-btn:hover {
-            color: #a1a1aa;
-            background: rgba(255, 255, 255, 0.05);
-            transform: none;
-            box-shadow: none;
-        }
-
-        .match-indicator {
-            position: absolute;
-            right: 16px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-
-        .match-indicator.match {
-            color: #10b981;
-        }
-
-        .match-indicator.no-match {
-            color: #ef4444;
-        }
-
-        /* Master Secret Strength Meter */
-        .master-strength {
-            margin-top: 8px;
-            display: none;
-        }
-
-        .master-strength.visible {
-            display: block;
-        }
-
-        .master-strength-bar-bg {
-            height: 4px;
-            background: #27272a;
-            border-radius: 2px;
-            overflow: hidden;
-            margin-bottom: 6px;
-        }
-
-        .master-strength-bar {
-            height: 100%;
-            border-radius: 2px;
-            transition: width 0.3s ease, background 0.3s ease;
-            width: 0%;
-        }
-
-        .master-strength-info {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.7rem;
-        }
-
-        .master-strength-label {
-            font-weight: 600;
-        }
-
-        .master-strength-tip {
-            color: #71717a;
-        }
-
-        .strength-weak { background: #ef4444; }
-        .strength-fair { background: #f59e0b; }
-        .strength-good { background: #10b981; }
-        .strength-strong { background: #8b5cf6; }
-
-        .strength-weak-text { color: #ef4444; }
-        .strength-fair-text { color: #f59e0b; }
-        .strength-good-text { color: #10b981; }
-        .strength-strong-text { color: #8b5cf6; }
-
-        .star-btn {
-            position: absolute;
-            right: 12px;
-            width: 32px;
-            height: 32px;
-            padding: 6px;
-            background: transparent;
-            border: none;
-            border-radius: 6px;
-            color: #71717a;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: color 0.2s, background 0.2s;
-        }
-
-        .star-btn:hover {
-            color: #fbbf24;
-            background: rgba(251, 191, 36, 0.1);
-            transform: none;
-            box-shadow: none;
-        }
-
-        .star-btn.saved {
-            color: #fbbf24;
-        }
-
-        .star-btn.out-of-sync {
-            color: #fbbf24;
-            opacity: 0.5;
-        }
-
-        .star-btn.out-of-sync:hover {
-            opacity: 1;
-        }
-
-        .star-btn .sync-dot {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 8px;
-            height: 8px;
-            background: #f97316;
-            border-radius: 50%;
-            display: none;
-        }
-
-        .star-btn.out-of-sync .sync-dot {
-            display: block;
-        }
-
-        .row {
-            display: flex;
-            gap: 12px;
-        }
-
-        .row .field {
-            flex: 1;
-        }
-
-        input[type="number"] {
-            text-align: center;
-        }
-
-        .options {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 24px;
-        }
-
-        .option {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-            font-size: 0.875rem;
-        }
-
-        .option:hover {
-            border-color: #3f3f46;
-        }
-
-        .option input {
-            accent-color: #10b981;
-            cursor: pointer;
-        }
-
-        .option span {
-            text-transform: none;
-        }
-
-        /* Entropy Meter Styles */
-        .entropy-container {
-            margin-bottom: 24px;
-        }
-
-        .entropy-bar-bg {
-            height: 6px;
-            background: #27272a;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-bottom: 8px;
-        }
-
-        .entropy-bar {
-            height: 100%;
-            border-radius: 3px;
-            transition: width 0.3s ease, background 0.3s ease;
-            width: 0%;
-        }
-
-        .entropy-info {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.75rem;
-        }
-
-        .entropy-bits {
-            color: #a1a1aa;
-            font-family: var(--font-mono);
-        }
-
-        .entropy-label {
-            font-weight: 600;
-        }
-
-        .entropy-weak { background: #ef4444; }
-        .entropy-fair { background: #f59e0b; }
-        .entropy-good { background: #10b981; }
-        .entropy-strong { background: #8b5cf6; }
-
-        .entropy-weak-text { color: #ef4444; }
-        .entropy-fair-text { color: #f59e0b; }
-        .entropy-good-text { color: #10b981; }
-        .entropy-strong-text { color: #8b5cf6; }
-
-        button {
-            padding: 16px;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            border: none;
-            border-radius: 10px;
-            color: #fff;
-            font-family: var(--font-sans);
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.15s, box-shadow 0.15s;
-        }
-
-        button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        .button-row {
-            display: flex;
-            gap: 12px;
-        }
-
-        .generate-btn {
-            flex: 1;
-        }
-
-        .clear-btn {
-            background: #27272a;
-            padding: 16px 20px;
-        }
-
-        .clear-btn:hover {
-            background: #3f3f46;
-            box-shadow: none;
-        }
-
-        .output {
-            margin-top: 24px;
-            padding: 20px;
-            background: #09090b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
-            display: none;
-        }
-
-        .output.visible {
-            display: block;
-            animation: fadeIn 0.3s ease;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .output-label {
-            font-size: 0.75rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #10b981;
-            margin-bottom: 12px;
-        }
-
-        .password-display {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .password-text {
-            flex: 1;
-            font-family: var(--font-mono);
-            font-size: 1.125rem;
-            word-break: break-all;
-            line-height: 1.5;
-        }
-
-        .copy-btn {
-            width: auto;
-            padding: 10px 16px;
-            background: #27272a;
-            font-size: 0.875rem;
-            flex-shrink: 0;
-        }
-
-        .copy-btn:hover {
-            background: #3f3f46;
-            box-shadow: none;
-            transform: none;
-        }
-
-        .copied {
-            background: #10b981 !important;
-        }
-
-        /* Loading spinner */
-        .generate-btn {
-            position: relative;
-        }
-
-        .generate-btn.loading {
-            color: transparent;
-            pointer-events: none;
-        }
-
-        .generate-btn.loading::after {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            top: 50%;
-            left: 50%;
-            margin-left: -10px;
-            margin-top: -10px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Theme toggle */
-        .theme-toggle {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 8px;
-            padding: 8px;
-            cursor: pointer;
-            color: #a1a1aa;
-            transition: all 0.2s;
-        }
-
-        .theme-toggle:hover {
-            background: #27272a;
-            color: #e4e4e7;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* Light mode */
-        body.light {
-            background: #f4f4f5;
-            color: #18181b;
-            background-image: 
-                radial-gradient(ellipse at 20% 80%, rgba(16, 185, 129, 0.1) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 20%, rgba(139, 92, 246, 0.1) 0%, transparent 50%);
-        }
-
-        body.light .card {
-            background: rgba(255, 255, 255, 0.9);
-            border-color: #e4e4e7;
-        }
-
-        body.light input[type="text"],
-        body.light input[type="password"],
-        body.light input[type="number"] {
-            background: #fff;
-            border-color: #d4d4d8;
-            color: #18181b;
-        }
-
-        body.light input::placeholder {
-            color: #a1a1aa;
-        }
-
-        body.light .option {
-            background: #f4f4f5;
-            border-color: #e4e4e7;
-        }
-
-        body.light .output {
-            background: #fff;
-            border-color: #e4e4e7;
-        }
-
-        body.light .clear-btn,
-        body.light .copy-btn {
-            background: #e4e4e7;
-            color: #18181b;
-        }
-
-        body.light .clear-btn:hover,
-        body.light .copy-btn:hover {
-            background: #d4d4d8;
-        }
-
-        body.light .theme-toggle {
-            background: #fff;
-            border-color: #e4e4e7;
-            color: #71717a;
-        }
-
-        body.light .theme-toggle:hover {
-            background: #f4f4f5;
-            color: #18181b;
-        }
-
-        body.light .entropy-bar-bg {
-            background: #e4e4e7;
-        }
-
-        body.light .footer {
-            color: #71717a;
-        }
-
-        body.light .how-it-works {
-            background: #fff;
-            border-color: #e4e4e7;
-        }
-
-        body.light .how-it-works-content {
-            color: #52525b;
-        }
-
-        /* How it works section */
-        .how-it-works {
-            margin-top: 24px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .how-it-works-header {
-            padding: 16px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #a1a1aa;
-            transition: color 0.2s;
-        }
-
-        .how-it-works-header:hover {
-            color: #e4e4e7;
-        }
-
-        .how-it-works-arrow {
-            transition: transform 0.2s;
-        }
-
-        .how-it-works.open .how-it-works-arrow {
-            transform: rotate(180deg);
-        }
-
-        .how-it-works-content {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .how-it-works.open .how-it-works-content {
-            max-height: 400px;
-        }
-
-        .how-it-works-inner {
-            padding: 0 16px 16px;
-            font-size: 0.8125rem;
-            line-height: 1.6;
-            color: #71717a;
-        }
-
-        .how-it-works-inner p {
-            margin-bottom: 12px;
-        }
-
-        .how-it-works-inner p:last-child {
-            margin-bottom: 0;
-        }
-
-        .how-it-works-inner strong {
-            color: #a1a1aa;
-        }
-
-        body.light .how-it-works-inner strong {
-            color: #52525b;
-        }
-
-        /* My Sites section */
-        .my-sites {
-            margin-top: 16px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            border-radius: 10px;
-            overflow: hidden;
-        }
-
-        .my-sites-header {
-            padding: 16px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #a1a1aa;
-            transition: color 0.2s;
-        }
-
-        .my-sites-header:hover {
-            color: #e4e4e7;
-        }
-
-        .my-sites-count {
-            background: #27272a;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 0.75rem;
-        }
-
-        .my-sites-arrow {
-            transition: transform 0.2s;
-        }
-
-        .my-sites.open .my-sites-arrow {
-            transform: rotate(180deg);
-        }
-
-        .my-sites-content {
-            max-height: 0;
-            overflow: hidden;
-            transition: max-height 0.3s ease;
-        }
-
-        .my-sites.open .my-sites-content {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
-        .my-sites-list {
-            padding: 0 8px 8px;
-        }
-
-        .my-sites-empty {
-            padding: 16px;
-            text-align: center;
-            color: #52525b;
-            font-size: 0.8125rem;
-        }
-
-        .site-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            margin-bottom: 4px;
-            background: #09090b;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-
-        .site-item:hover {
-            background: #27272a;
-        }
-
-        .site-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .site-name {
-            font-family: var(--font-mono);
-            font-size: 0.875rem;
-            color: #e4e4e7;
-        }
-
-        .site-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .site-settings {
-            font-size: 0.7rem;
-            color: #52525b;
-            margin-top: 2px;
-        }
-
-        .site-delete {
-            background: none;
-            border: none;
-            color: #52525b;
-            cursor: pointer;
-            padding: 4px;
-            border-radius: 4px;
-            transition: color 0.2s, background 0.2s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .site-delete:hover {
-            color: #ef4444;
-            background: rgba(239, 68, 68, 0.1);
-            transform: none;
-            box-shadow: none;
-        }
-
-        body.light .my-sites {
-            background: #fff;
-            border-color: #e4e4e7;
-        }
-
-        body.light .my-sites-count {
-            background: #e4e4e7;
-        }
-
-        body.light .site-item {
-            background: #f4f4f5;
-        }
-
-        body.light .site-item:hover {
-            background: #e4e4e7;
-        }
-
-        body.light .site-name {
-            color: #18181b;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 24px;
-            font-size: 0.75rem;
-            color: #52525b;
-        }
-
-        .install-prompt {
-            display: none;
-            margin-top: 12px;
-        }
-
-        .install-btn {
-            padding: 8px 16px;
-            background: #18181b;
-            border: 1px solid #27272a;
-            color: #a1a1aa;
-            font-size: 0.75rem;
-        }
-
-        .install-btn:hover {
-            background: #27272a;
-            color: #e4e4e7;
-        }
-    </style>
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="stylesheet" href="styles.css">
+    <script src="theme.js"></script>
+    <script type="module" src="app.js"></script>
 </head>
 <body>
-    <button class="theme-toggle" aria-label="Toggle theme">
-        <svg id="theme-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="5"></circle>
-            <line x1="12" y1="1" x2="12" y2="3"></line>
-            <line x1="12" y1="21" x2="12" y2="23"></line>
-            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-            <line x1="1" y1="12" x2="3" y2="12"></line>
-            <line x1="21" y1="12" x2="23" y2="12"></line>
-            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-        </svg>
-        <svg id="theme-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-        </svg>
-    </button>
-
-    <div class="container">
-        <div class="header">
-            <h1>🔐 Password Generator</h1>
-            <p>Deterministic · Nothing stored · Runs locally</p>
+    <header class="topbar">
+        <div class="brand">
+            <img src="icon-192.png" alt="" width="28" height="28">
+            <span>PassGen</span>
         </div>
+        <div class="topbar-actions">
+            <button type="button" id="lockBtn" class="btn small ghost" hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                Lock
+            </button>
+            <button type="button" id="themeToggle" class="icon-btn" aria-label="Switch theme">
+                <svg class="icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path></svg>
+                <svg class="icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            </button>
+        </div>
+    </header>
 
-        <div class="card">
+    <main class="container">
+        <p class="tagline">Same inputs, same password. Nothing leaves your device and no passwords are stored.</p>
+
+        <form id="form" class="card" autocomplete="off" novalidate>
+            <!-- Master secret -->
             <div class="field">
-                <label>Master Secret</label>
-                <div class="input-wrapper">
-                    <input type="password" id="master" placeholder="Your secret keyword" autocomplete="off">
-                    <button type="button" class="toggle-btn" aria-label="Toggle password visibility">
-                        <svg id="eye-open" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                            <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                        <svg id="eye-closed" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
-                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                            <line x1="1" y1="1" x2="23" y2="23"></line>
-                        </svg>
+                <label for="master">Master secret</label>
+                <div class="input-wrap">
+                    <input id="master" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Your master secret" aria-describedby="fingerprintStatus">
+                    <button type="button" id="revealMaster" class="icon-btn inset" aria-label="Show master secret" aria-pressed="false">
+                        <svg class="icon-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        <svg class="icon-eye-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
                     </button>
                 </div>
-                <div class="master-strength" id="masterStrength">
-                    <div class="master-strength-bar-bg">
-                        <div class="master-strength-bar" id="masterStrengthBar"></div>
-                    </div>
-                    <div class="master-strength-info">
-                        <span class="master-strength-label" id="masterStrengthLabel"></span>
-                        <span class="master-strength-tip" id="masterStrengthTip"></span>
+                <div class="meter-track thin" id="masterMeter" hidden><div class="meter-fill" id="masterMeterFill"></div></div>
+                <div class="master-meta">
+                    <p class="strength-text" id="masterStrength" hidden><strong id="masterStrengthLabel"></strong> <span id="masterStrengthTip"></span></p>
+                    <div class="fingerprint" id="fingerprint" hidden title="Your fingerprint: the same master secret always shows the same icons. Different icons mean a typo.">
+                        <span class="fp-icons" id="fpIcons" aria-hidden="true"></span>
+                        <span class="spinner" id="fpSpinner" hidden></span>
+                        <span class="visually-hidden" id="fingerprintStatus" aria-live="polite"></span>
                     </div>
                 </div>
             </div>
 
+            <!-- Site -->
             <div class="field">
-                <label>Confirm Master Secret</label>
-                <div class="input-wrapper">
-                    <input type="password" id="masterConfirm" placeholder="Confirm your secret" autocomplete="off">
-                    <span class="match-indicator" id="matchIndicator"></span>
-                </div>
-            </div>
-
-            <div class="field">
-                <label>Site / Label (optional)</label>
-                <div class="input-wrapper">
-                    <input type="text" id="site" placeholder="e.g., gmail.com">
-                    <button type="button" class="star-btn" id="starBtn" aria-label="Save site">
-                        <svg id="star-outline" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                        </svg>
-                        <svg id="star-filled" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                        </svg>
-                        <span class="sync-dot"></span>
+                <label for="site">Site</label>
+                <div class="input-wrap">
+                    <input id="site" type="text" list="savedSitesList" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="e.g. github.com" aria-describedby="siteHint">
+                    <button type="button" id="saveBtn" class="icon-btn inset star" aria-label="Save site settings" aria-pressed="false">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path></svg>
                     </button>
                 </div>
-            </div>
-
-            <div class="row">
-                <div class="field">
-                    <label>Length</label>
-                    <input type="number" id="length" value="20" min="8" max="64">
+                <datalist id="savedSitesList"></datalist>
+                <p class="hint" id="siteHint"></p>
+                <div class="notice" id="syncNotice" hidden>
+                    <span>Settings differ from the ones saved for this site.</span>
+                    <span class="notice-actions">
+                        <button type="button" id="revertSaved" class="link-btn">Use saved</button>
+                        <button type="button" id="updateSaved" class="link-btn">Update saved</button>
+                    </span>
                 </div>
             </div>
 
-            <label>Include</label>
-            <div class="options">
-                <label class="option">
-                    <input type="checkbox" id="lowercase" checked>
-                    <span>a-z</span>
-                </label>
-                <label class="option">
-                    <input type="checkbox" id="uppercase" checked>
-                    <span>A-Z</span>
-                </label>
-                <label class="option">
-                    <input type="checkbox" id="numbers" checked>
-                    <span>0-9</span>
-                </label>
-                <label class="option">
-                    <input type="checkbox" id="symbols" checked>
-                    <span>!@#$</span>
-                </label>
-            </div>
+            <!-- Options -->
+            <details class="options" id="optionsPanel">
+                <summary>
+                    <span class="summary-title">Options</span>
+                    <span class="summary-meta" id="optionsSummary"></span>
+                    <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                </summary>
+                <div class="options-body">
+                    <div class="field">
+                        <label for="length">Length</label>
+                        <div class="length-row">
+                            <input id="lengthRange" type="range" min="4" max="64" value="20" aria-label="Length" tabindex="-1">
+                            <input id="length" type="number" min="4" max="64" value="20" inputmode="numeric">
+                        </div>
+                    </div>
 
-            <!-- Entropy Meter -->
-            <div class="entropy-container">
-                <label>Strength</label>
-                <div class="entropy-bar-bg">
-                    <div class="entropy-bar" id="entropyBar"></div>
+                    <fieldset class="field">
+                        <legend>Characters</legend>
+                        <div class="chips">
+                            <label class="chip"><input type="checkbox" id="lowercase" checked><span>a–z</span></label>
+                            <label class="chip"><input type="checkbox" id="uppercase" checked><span>A–Z</span></label>
+                            <label class="chip"><input type="checkbox" id="digits" checked><span>0–9</span></label>
+                            <label class="chip"><input type="checkbox" id="symbols" checked><span>!@#</span></label>
+                        </div>
+                        <p class="hint">Every selected type is guaranteed to appear at least once.</p>
+                    </fieldset>
+
+                    <div class="field">
+                        <label for="symbolSet">Symbols</label>
+                        <select id="symbolSet">
+                            <option value="all">All: !@#$%^&amp;*()_+-=[]{}|;:,.&lt;&gt;?</option>
+                            <option value="simple">Simple: !@#$%^&amp;* (for picky sites)</option>
+                        </select>
+                    </div>
+
+                    <div class="two-col">
+                        <div class="field">
+                            <label for="login">Username <span class="optional">optional</span></label>
+                            <input id="login" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="for 2+ accounts">
+                        </div>
+                        <div class="field">
+                            <label for="counter">Version</label>
+                            <div class="stepper">
+                                <button type="button" id="counterDec" class="icon-btn small" aria-label="Previous version">−</button>
+                                <input id="counter" type="number" min="1" max="9999" value="1" inputmode="numeric">
+                                <button type="button" id="counterInc" class="icon-btn small" aria-label="Next version">+</button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="hint">Need a new password for a site (e.g. after a breach)? Increase the version and save.</p>
+                    <button type="button" id="resetOptions" class="link-btn">Reset options to defaults</button>
                 </div>
-                <div class="entropy-info">
-                    <span class="entropy-bits" id="entropyBits">131 bits</span>
-                    <span class="entropy-label" id="entropyLabel">Strong</span>
+            </details>
+
+            <!-- Result -->
+            <section class="result" aria-labelledby="resultTitle">
+                <div class="result-head">
+                    <h2 id="resultTitle" class="result-title">Password</h2>
+                    <span class="result-for" id="resultFor"></span>
                 </div>
-            </div>
-
-            <label>Security</label>
-            <div class="options">
-                <label class="option">
-                    <input type="checkbox" id="autoClear" checked>
-                    <span>Auto-clear after copy</span>
-                </label>
-            </div>
-
-            <div class="button-row">
-                <button class="generate-btn">Generate Password</button>
-                <button class="clear-btn">Clear All</button>
-            </div>
-
-            <div class="output" id="output">
-                <div class="output-label">Your Password</div>
-                <div class="password-display">
-                    <span class="password-text" id="password"></span>
-                    <button class="copy-btn">Copy</button>
+                <div class="result-box" id="resultBox">
+                    <output id="password" class="password" aria-live="off"></output>
+                    <p class="result-status" id="resultStatus"></p>
+                    <button type="button" id="revealPassword" class="icon-btn" aria-label="Show password" aria-pressed="false" hidden>
+                        <svg class="icon-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        <svg class="icon-eye-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><path d="M1 1l22 22"></path></svg>
+                    </button>
                 </div>
-            </div>
-        </div>
-
-        <div class="footer">
-            All processing happens in your browser · v1.0
-            <div class="install-prompt" id="installPrompt">
-                <button class="install-btn">Install as App</button>
-            </div>
-        </div>
-
-        <div class="how-it-works" id="howItWorks">
-            <div class="how-it-works-header">
-                <span>How it works</span>
-                <svg class="how-it-works-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-            </div>
-            <div class="how-it-works-content">
-                <div class="how-it-works-inner">
-                    <p><strong>No passwords are stored.</strong> Your password is generated on-the-fly using your master secret and site name as inputs.</p>
-                    <p><strong>Deterministic generation:</strong> Same inputs always produce the same password. Forget it? Just regenerate it.</p>
-                    <p><strong>PBKDF2-SHA256</strong> with 1,000,000 iterations makes brute-force attacks extremely slow and costly.</p>
-                    <p><strong>100% local:</strong> Nothing leaves your browser. No servers, no tracking, no data collection.</p>
+                <div class="entropy">
+                    <div class="meter-track" role="meter" id="entropyMeter" aria-label="Password strength" aria-valuemin="0" aria-valuemax="100"><div class="meter-fill" id="entropyFill"></div></div>
+                    <div class="entropy-text"><span id="entropyBits"></span><strong id="entropyLabel"></strong></div>
                 </div>
-            </div>
-        </div>
+                <button type="submit" id="copyBtn" class="btn primary block" disabled>Copy password</button>
+            </section>
+        </form>
 
-        <div class="my-sites" id="mySites">
-            <div class="my-sites-header">
-                <span>My Sites <span class="my-sites-count" id="sitesCount">0</span></span>
-                <svg class="my-sites-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
+        <details class="panel" id="sitesPanel">
+            <summary>
+                <span class="summary-title">Saved sites <span class="badge" id="sitesCount">0</span></span>
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </summary>
+            <div class="panel-body">
+                <input id="sitesFilter" type="search" class="filter" placeholder="Filter saved sites" aria-label="Filter saved sites" autocomplete="off" spellcheck="false" hidden>
+                <ul id="sitesList" class="sites-list"></ul>
+                <p id="sitesEmpty" class="empty">No saved sites yet. Tap the star next to a site to remember its settings.</p>
+                <div class="panel-actions">
+                    <button type="button" id="exportBtn" class="btn small">Export backup</button>
+                    <button type="button" id="importBtn" class="btn small">Import</button>
+                    <input id="importFile" type="file" accept="application/json,.json" hidden>
+                </div>
+                <p class="hint">Only site names and settings are saved, in this browser. Never your master secret or passwords. Export a backup now and then.</p>
             </div>
-            <div class="my-sites-content">
-                <div class="my-sites-list" id="sitesList"></div>
-            </div>
-        </div>
-    </div>
+        </details>
 
-    <script src="app.js"></script>
+        <details class="panel" id="prefsPanel">
+            <summary>
+                <span class="summary-title">Privacy settings</span>
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </summary>
+            <div class="panel-body">
+                <label class="switch"><input type="checkbox" id="prefClearClipboard" checked><span>Clear the clipboard 30 seconds after copying</span></label>
+                <label class="switch"><input type="checkbox" id="prefAutoLock" checked><span>Forget the master secret after 5 minutes of inactivity</span></label>
+            </div>
+        </details>
+
+        <details class="panel" id="howPanel">
+            <summary>
+                <span class="summary-title">How it works</span>
+                <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+            </summary>
+            <div class="panel-body prose">
+                <p><strong>No passwords are stored.</strong> Each password is computed from your master secret, the site, and the options. The same inputs always give the same password, on any device.</p>
+                <p><strong>Slow on purpose, once.</strong> Your master secret is stretched with PBKDF2-SHA256 (1,000,000 iterations), so every guess costs an attacker the same work. That happens once per session. Site passwords are then derived with HMAC-SHA256, which is instant.</p>
+                <p><strong>Fingerprint.</strong> The three icons next to your master secret come from it. Learn yours: if they ever look different, you mistyped.</p>
+                <p><strong>Version.</strong> Increase it to get a fresh password for one site without changing anything else.</p>
+                <p><strong>100% local.</strong> The app makes no network requests. Its Content Security Policy forbids them. It works offline once loaded.</p>
+            </div>
+        </details>
+    </main>
+
+    <footer class="footer">
+        <p>Runs entirely in your browser · <span id="appVersion">v2</span></p>
+        <button type="button" id="installBtn" class="btn small" hidden>Install app</button>
+        <p class="hint" id="iosHint" hidden>To install: tap Share, then “Add to Home Screen”.</p>
+    </footer>
+
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 </body>
 </html>

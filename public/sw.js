@@ -1,57 +1,69 @@
-var CACHE_NAME = 'passgen-v2';
-var ASSETS = [
-  './',
-  './index.html',
-  './app.js',
-  './manifest.json',
-  './icon-192.png',
-  './icon-512.png'
+// PassGen service worker: cache-first app shell so the app opens instantly and
+// works offline. Bump CACHE on every deploy that changes any file below;
+// users then get a "new version available" prompt.
+const CACHE = 'passgen-v2.0.1';
+const ASSETS = [
+    './index.html',
+    './styles.css',
+    './theme.js',
+    './app.js',
+    './core.js',
+    './manifest.json',
+    './icon-192.png',
+    './icon-512.png',
+    './icon-maskable-512.png',
+    './apple-touch-icon.png'
 ];
 
-// Install: cache core assets
-self.addEventListener('install', function (event) {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then(function (cache) {
-      return cache.addAll(ASSETS);
-    })
-  );
-  self.skipWaiting();
+const SCOPE_PATH = new URL('./', self.location).pathname;
+
+// Versioned cache names. Anything else ('passgen-v1', 'passgen-v2') belongs to
+// the pre-v2 service worker.
+const VERSIONED = /^passgen-v\d+\.\d+\.\d+$/;
+
+self.addEventListener('install', (event) => {
+    event.waitUntil((async () => {
+        const cache = await caches.open(CACHE);
+        // Bypass the HTTP cache so a new version never caches stale files.
+        await cache.addAll(ASSETS.map((url) => new Request(url, { cache: 'reload' })));
+        // Pages of the pre-v2 app have no "new version" prompt, so a waiting worker
+        // would never be activated while one is open: take over from it right away.
+        const keys = await caches.keys();
+        if (keys.some((key) => !VERSIONED.test(key))) await self.skipWaiting();
+    })());
 });
 
-// Activate: clean up old caches
-self.addEventListener('activate', function (event) {
-  event.waitUntil(
-    caches.keys().then(function (keys) {
-      return Promise.all(
-        keys.filter(function (key) { return key !== CACHE_NAME; })
-            .map(function (key) { return caches.delete(key); })
-      );
-    })
-  );
-  self.clients.claim();
+self.addEventListener('activate', (event) => {
+    event.waitUntil((async () => {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)));
+        await self.clients.claim();
+    })());
 });
 
-// Fetch: network-first with cache fallback
-self.addEventListener('fetch', function (event) {
-  event.respondWith(
-    fetch(event.request).then(function (response) {
-      if (response.ok) {
-        var clone = response.clone();
-        caches.open(CACHE_NAME).then(function (cache) {
-          cache.put(event.request, clone);
-        });
-      }
-      return response;
-    }).catch(function () {
-      return caches.match(event.request).then(function (cached) {
-        if (cached) return cached;
-        if (event.request.mode === 'navigate') {
-          return new Response(
-            '<!DOCTYPE html><html><body style="background:#0a0a0b;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center"><h1>Offline</h1><p>Please check your connection</p></div></body></html>',
-            { headers: { 'Content-Type': 'text/html' } }
-          );
+// The page asks the waiting worker to take over when the user clicks "Reload".
+self.addEventListener('message', (event) => {
+    if (event.data === 'skipWaiting') self.skipWaiting();
+});
+
+self.addEventListener('fetch', (event) => {
+    const request = event.request;
+    if (request.method !== 'GET') return;
+    const url = new URL(request.url);
+    if (url.origin !== self.location.origin) return;
+
+    if (request.mode === 'navigate') {
+        // Any visit to the app's start page (with or without ?query) gets the cached shell.
+        if (url.pathname === SCOPE_PATH || url.pathname === SCOPE_PATH + 'index.html') {
+            event.respondWith(fromCache('./index.html').then((cached) => cached || fetch(request)));
         }
-      });
-    })
-  );
+        return;
+    }
+
+    event.respondWith(fromCache(request).then((cached) => cached || fetch(request)));
 });
+
+async function fromCache(request) {
+    const cache = await caches.open(CACHE);
+    return cache.match(request, { ignoreSearch: true });
+}

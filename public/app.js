@@ -1,668 +1,872 @@
-// Theme toggle
-function toggleTheme() {
-    var body = document.body;
-    var sun = document.getElementById('theme-sun');
-    var moon = document.getElementById('theme-moon');
+// PassGen UI. All password derivation lives in core.js.
+import {
+    VERSION, LIMITS, DEFAULT_SETTINGS, normalizeSite, sanitizeSettings, deriveMasterKey,
+    generatePassword, fingerprint, passwordEntropy, estimateMasterStrength
+} from './core.js';
 
-    body.classList.toggle('light');
-    var isLight = body.classList.contains('light');
+const el = new Proxy({}, { get: (cache, id) => cache[id] ??= document.getElementById(id) });
 
-    sun.style.display = isLight ? 'none' : 'block';
-    moon.style.display = isLight ? 'block' : 'none';
+const DERIVE_DELAY_MS = 450;
+const CLIPBOARD_CLEAR_MS = 30_000;
+const AUTO_LOCK_MS = 5 * 60_000;
+const SITES_KEY = 'passgen.sites';
+const PREFS_KEY = 'passgen.prefs';
 
-    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+// ---------------------------------------------------------------------------
+// Storage: never let a blocked/full localStorage break the generator
+// ---------------------------------------------------------------------------
+
+const storage = {
+    getRaw(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    setRaw(key, value) { try { localStorage.setItem(key, value); return true; } catch { return false; } },
+    getJSON(key, fallback) {
+        const raw = this.getRaw(key);
+        if (raw === null) return fallback;
+        try { return JSON.parse(raw); } catch { return fallback; }
+    },
+    setJSON(key, value) { return this.setRaw(key, JSON.stringify(value)); }
+};
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+const state = {
+    masterKey: null,      // CryptoKey derived from `keyFor`
+    keyFor: null,         // the master string masterKey belongs to
+    deriving: null,       // master string currently being derived
+    deriveTimer: 0,
+    genSeq: 0,            // bumps on every input change; stale results are dropped
+    result: null,         // { seq, password, site, settings }
+    showPassword: false,
+    lastSite: '',
+    autoApplied: null,    // { previous: settings } when saved settings were auto-loaded
+    settingsTouched: false,
+    clipboardTimer: 0,
+    clipboardPending: false,
+    lastActivity: Date.now(),
+    sites: [],
+    prefs: { clearClipboard: true, autoLock: true },
+    installPrompt: null
+};
+
+// ---------------------------------------------------------------------------
+// Toasts
+// ---------------------------------------------------------------------------
+
+function toast(message, { action, onAction, duration = 3500 } = {}) {
+    const node = document.createElement('div');
+    node.className = 'toast';
+    const text = document.createElement('span');
+    text.textContent = message;
+    node.append(text);
+    let timer = 0;
+    const close = () => { clearTimeout(timer); node.remove(); };
+    if (action) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'link-btn';
+        btn.textContent = action;
+        btn.addEventListener('click', () => { close(); onAction(); });
+        node.append(btn);
+    }
+    // Keep at most 2 toasts on screen.
+    while (el.toasts.children.length >= 2) el.toasts.firstElementChild.remove();
+    el.toasts.append(node);
+    if (duration > 0) timer = setTimeout(close, duration);
+    return close;
 }
 
-// Load saved theme immediately to avoid flash
-(function () {
-    var saved = localStorage.getItem('theme');
-    if (saved === 'light') {
-        document.body.classList.add('light');
-        document.getElementById('theme-sun').style.display = 'none';
-        document.getElementById('theme-moon').style.display = 'block';
-    }
-})();
+// ---------------------------------------------------------------------------
+// Settings <-> form
+// ---------------------------------------------------------------------------
 
-// How it works toggle
-function toggleHowItWorks() {
-    document.getElementById('howItWorks').classList.toggle('open');
-}
-
-// Site name normalization
-function normalizeSite(value) {
-    return value.toLowerCase().trim();
-}
-
-function toggleMaster() {
-    var input = document.getElementById('master');
-    var eyeOpen = document.getElementById('eye-open');
-    var eyeClosed = document.getElementById('eye-closed');
-
-    if (input.type === 'password') {
-        input.type = 'text';
-        eyeOpen.style.display = 'none';
-        eyeClosed.style.display = 'block';
-    } else {
-        input.type = 'password';
-        eyeOpen.style.display = 'block';
-        eyeClosed.style.display = 'none';
-    }
-}
-
-function getCharsetSize() {
-    var size = 0;
-    if (document.getElementById('lowercase').checked) size += 26;
-    if (document.getElementById('uppercase').checked) size += 26;
-    if (document.getElementById('numbers').checked) size += 10;
-    if (document.getElementById('symbols').checked) size += 26;
-    return size;
-}
-
-function updateEntropy() {
-    var length = parseInt(document.getElementById('length').value) || 20;
-    var charsetSize = getCharsetSize();
-
-    if (charsetSize === 0) {
-        document.getElementById('entropyBits').textContent = '0 bits';
-        document.getElementById('entropyLabel').textContent = 'Invalid';
-        document.getElementById('entropyBar').style.width = '0%';
-        return;
-    }
-
-    var entropy = Math.floor(length * Math.log2(charsetSize));
-
-    var bar = document.getElementById('entropyBar');
-    var bitsLabel = document.getElementById('entropyBits');
-    var strengthLabel = document.getElementById('entropyLabel');
-
-    bitsLabel.textContent = entropy + ' bits';
-
-    bar.className = 'entropy-bar';
-    strengthLabel.className = 'entropy-label';
-
-    var strength, barClass, percentage;
-    if (entropy < 40) {
-        strength = 'Weak';
-        barClass = 'entropy-weak';
-        percentage = Math.min((entropy / 40) * 25, 25);
-    } else if (entropy < 64) {
-        strength = 'Fair';
-        barClass = 'entropy-fair';
-        percentage = 25 + ((entropy - 40) / 24) * 25;
-    } else if (entropy < 100) {
-        strength = 'Good';
-        barClass = 'entropy-good';
-        percentage = 50 + ((entropy - 64) / 36) * 25;
-    } else {
-        strength = 'Strong';
-        barClass = 'entropy-strong';
-        percentage = Math.min(75 + ((entropy - 100) / 50) * 25, 100);
-    }
-
-    bar.classList.add(barClass);
-    bar.style.width = percentage + '%';
-    strengthLabel.textContent = strength;
-    strengthLabel.classList.add(barClass + '-text');
-}
-
-async function generate() {
-    var master = document.getElementById('master').value;
-    var masterConfirm = document.getElementById('masterConfirm').value;
-    var site = normalizeSite(document.getElementById('site').value);
-    var length = Math.min(64, Math.max(8, parseInt(document.getElementById('length').value) || 20));
-    var iterations = 1000000;
-    var btn = document.querySelector('.generate-btn');
-
-    document.getElementById('length').value = length;
-    document.getElementById('site').value = site;
-
-    if (!master) {
-        alert('Please enter a master secret');
-        return;
-    }
-
-    if (master !== masterConfirm) {
-        alert('Master secrets do not match');
-        return;
-    }
-
-    var charset = '';
-    if (document.getElementById('lowercase').checked) charset += 'abcdefghijklmnopqrstuvwxyz';
-    if (document.getElementById('uppercase').checked) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    if (document.getElementById('numbers').checked) charset += '0123456789';
-    if (document.getElementById('symbols').checked) charset += '!@#$%^&*()_+-=[]{}|;:,.<>?';
-
-    if (!charset) {
-        alert('Please select at least one character type');
-        return;
-    }
-
-    btn.classList.add('loading');
-
-    try {
-        var encoder = new TextEncoder();
-        var saltString = 'v1|' + site + '|' + length + '|' + charset;
-        var salt = encoder.encode(saltString);
-
-        var keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(master),
-            'PBKDF2',
-            false,
-            ['deriveBits']
-        );
-
-        var bitsNeeded = Math.max(512, length * 16);
-
-        var derivedBits = await crypto.subtle.deriveBits(
-            {
-                name: 'PBKDF2',
-                salt: salt,
-                iterations: iterations,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            bitsNeeded
-        );
-
-        var hashArray = new Uint8Array(derivedBits);
-
-        var password = '';
-        var byteIndex = 0;
-        var derivationCounter = 0;
-        var maxFairByte = 256 - (256 % charset.length);
-
-        while (password.length < length) {
-            if (byteIndex >= hashArray.length) {
-                derivationCounter++;
-                var extraSalt = encoder.encode(saltString + '|' + derivationCounter);
-                var extraBits = await crypto.subtle.deriveBits(
-                    {
-                        name: 'PBKDF2',
-                        salt: extraSalt,
-                        iterations: iterations,
-                        hash: 'SHA-256'
-                    },
-                    keyMaterial,
-                    512
-                );
-                hashArray = new Uint8Array(extraBits);
-                byteIndex = 0;
-            }
-
-            var byte = hashArray[byteIndex++];
-
-            if (byte < maxFairByte) {
-                password += charset[byte % charset.length];
-            }
-        }
-
-        document.getElementById('password').textContent = password;
-        document.getElementById('output').classList.add('visible');
-    } catch (err) {
-        alert('Failed to generate password. Make sure you are using HTTPS.');
-    } finally {
-        btn.classList.remove('loading');
-    }
-}
-
-function copyPassword() {
-    var password = document.getElementById('password').textContent;
-    var autoClear = document.getElementById('autoClear').checked;
-    var btn = document.querySelector('.copy-btn');
-
-    var doCopy = async function () {
-        try {
-            await navigator.clipboard.writeText(password);
-            return true;
-        } catch (err) {
-            var textarea = document.createElement('textarea');
-            textarea.value = password;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            try {
-                document.execCommand('copy');
-                return true;
-            } catch (e) {
-                return false;
-            } finally {
-                document.body.removeChild(textarea);
-            }
-        }
-    };
-
-    doCopy().then(function (success) {
-        if (success) {
-            btn.textContent = 'Copied!';
-            btn.classList.add('copied');
-        } else {
-            btn.textContent = 'Failed';
-        }
-
-        setTimeout(function () {
-            btn.textContent = 'Copy';
-            btn.classList.remove('copied');
-
-            if (autoClear && success) {
-                document.getElementById('master').value = '';
-                document.getElementById('masterConfirm').value = '';
-                document.getElementById('site').value = '';
-                document.getElementById('password').textContent = '';
-                document.getElementById('output').classList.remove('visible');
-                updateMatchIndicator();
-                document.getElementById('masterStrength').classList.remove('visible');
-            }
-        }, 1500);
+function readSettings() {
+    return sanitizeSettings({
+        length: el.length.value,
+        lowercase: el.lowercase.checked,
+        uppercase: el.uppercase.checked,
+        digits: el.digits.checked,
+        symbols: el.symbols.checked,
+        symbolSet: el.symbolSet.value,
+        counter: el.counter.value,
+        login: el.login.value
     });
 }
 
-function clearAll() {
-    document.getElementById('master').value = '';
-    document.getElementById('masterConfirm').value = '';
-    document.getElementById('site').value = '';
-    document.getElementById('length').value = '20';
-    document.getElementById('password').textContent = '';
-    document.getElementById('output').classList.remove('visible');
-
-    document.getElementById('lowercase').checked = true;
-    document.getElementById('uppercase').checked = true;
-    document.getElementById('numbers').checked = true;
-    document.getElementById('symbols').checked = true;
-    document.getElementById('autoClear').checked = true;
-
-    var input = document.getElementById('master');
-    var eyeOpen = document.getElementById('eye-open');
-    var eyeClosed = document.getElementById('eye-closed');
-    input.type = 'password';
-    eyeOpen.style.display = 'block';
-    eyeClosed.style.display = 'none';
-
-    updateEntropy();
-    updateMatchIndicator();
-    document.getElementById('masterStrength').classList.remove('visible');
+function writeSettings(raw) {
+    const s = sanitizeSettings(raw);
+    el.length.value = s.length;
+    el.lengthRange.value = s.length;
+    el.lowercase.checked = s.lowercase;
+    el.uppercase.checked = s.uppercase;
+    el.digits.checked = s.digits;
+    el.symbols.checked = s.symbols;
+    el.symbolSet.value = s.symbolSet;
+    el.counter.value = s.counter;
+    el.login.value = s.login;
 }
 
-// Common passwords list
-var commonPasswords = [
-    'password', '123456', '12345678', 'qwerty', 'abc123', 'monkey', 'master',
-    'dragon', '111111', 'baseball', 'iloveyou', 'trustno1', 'sunshine',
-    'princess', 'welcome', 'shadow', 'superman', 'michael', 'football',
-    'password1', 'password123', 'batman', 'login', 'admin', 'letmein',
-    'qwerty123', 'solo', 'passw0rd', 'starwars', 'hello', 'freedom',
-    'whatever', 'qazwsx', 'secret', 'password!', 'google', 'zaq1zaq1',
-    '123456789', '1234567890', '1234567', '12345', '123123', '000000',
-    '1111111', '1234', 'azerty', 'access', 'mustang', 'ashley', 'hunter',
-    'jennifer', 'nicole', 'jordan', 'jessica', 'thomas', 'joshua', 'pepper',
-    'love', 'amanda', 'andrew', 'killer', 'charlie', 'soccer', 'summer',
-    'ranger', 'pass', 'buster', 'george', 'merlin', 'asshole', 'ginger',
-    'thunder', 'maggie', 'mickey', 'cheese', 'test', 'cookie', 'tiger',
-    'robert', 'daniel', 'david', 'magic', 'computer', 'nothing', 'orange',
-    'winner', 'chicken', 'silver', 'flower', 'matrix', 'diamond', 'yellow'
-];
-
-function checkMasterStrength(password) {
-    if (!password) {
-        return { score: 0, label: '', tip: '', class: '' };
-    }
-
-    var score = 0;
-    var tips = [];
-
-    if (password.length >= 8) score += 1;
-    if (password.length >= 12) score += 1;
-    if (password.length >= 16) score += 1;
-    if (password.length >= 20) score += 1;
-    if (password.length < 8) tips.push('Use 8+ characters');
-
-    var hasLower = /[a-z]/.test(password);
-    var hasUpper = /[A-Z]/.test(password);
-    var hasNumber = /[0-9]/.test(password);
-    var hasSymbol = /[^a-zA-Z0-9]/.test(password);
-
-    var variety = [hasLower, hasUpper, hasNumber, hasSymbol].filter(Boolean).length;
-    score += variety;
-
-    if (!hasUpper && hasLower) tips.push('Add uppercase');
-    if (!hasNumber) tips.push('Add numbers');
-    if (!hasSymbol) tips.push('Add symbols');
-
-    if (commonPasswords.includes(password.toLowerCase())) {
-        score = Math.min(score, 1);
-        tips = ['This is a common password'];
-    }
-
-    var hasRepeat = /(.)\1{2,}/.test(password);
-    var hasSequence = /(012|123|234|345|456|567|678|789|890|abc|bcd|cde|def|efg|fgh|ghi|hij|ijk|jkl|klm|lmn|mno|nop|opq|pqr|qrs|rst|stu|tuv|uvw|vwx|wxy|xyz)/i.test(password);
-    var hasKeyboardSeq = /(qwerty|asdf|zxcv|qazwsx)/i.test(password);
-
-    if (hasRepeat || hasSequence || hasKeyboardSeq) {
-        score = Math.max(score - 2, 1);
-        if (tips.length === 0) tips.push('Avoid patterns');
-    }
-
-    var label, barClass;
-    if (score <= 2) {
-        label = 'Weak';
-        barClass = 'strength-weak';
-    } else if (score <= 4) {
-        label = 'Fair';
-        barClass = 'strength-fair';
-    } else if (score <= 6) {
-        label = 'Good';
-        barClass = 'strength-good';
-    } else {
-        label = 'Strong';
-        barClass = 'strength-strong';
-    }
-
-    var percentage = Math.min((score / 8) * 100, 100);
-
-    return {
-        score: score,
-        label: label,
-        tip: tips[0] || '',
-        class: barClass,
-        percentage: percentage
-    };
+function settingsEqual(a, b) {
+    return a.length === b.length && a.lowercase === b.lowercase && a.uppercase === b.uppercase &&
+        a.digits === b.digits && a.symbols === b.symbols && a.counter === b.counter && a.login === b.login &&
+        (!a.symbols || a.symbolSet === b.symbolSet);
 }
 
-function updateMasterStrength() {
-    var password = document.getElementById('master').value;
-    var container = document.getElementById('masterStrength');
-    var bar = document.getElementById('masterStrengthBar');
-    var label = document.getElementById('masterStrengthLabel');
-    var tip = document.getElementById('masterStrengthTip');
-
-    if (!password) {
-        container.classList.remove('visible');
-        return;
-    }
-
-    container.classList.add('visible');
-    var strength = checkMasterStrength(password);
-
-    bar.className = 'master-strength-bar ' + strength.class;
-    bar.style.width = strength.percentage + '%';
-    label.className = 'master-strength-label ' + strength.class + '-text';
-    label.textContent = strength.label;
-    tip.textContent = strength.tip;
+function describeSettings(s, { withLogin = true } = {}) {
+    const parts = [`${s.length} chars`];
+    const classes = [];
+    if (s.lowercase) classes.push('a-z');
+    if (s.uppercase) classes.push('A-Z');
+    if (s.digits) classes.push('0-9');
+    if (s.symbols) classes.push(s.symbolSet === 'simple' ? '!@#*' : '!@#');
+    parts.push(classes.join(' '));
+    if (s.counter > 1) parts.push(`v${s.counter}`);
+    if (withLogin && s.login) parts.unshift(s.login);
+    return parts.join(' · ');
 }
 
-function updateMatchIndicator() {
-    var master = document.getElementById('master').value;
-    var masterConfirm = document.getElementById('masterConfirm').value;
-    var indicator = document.getElementById('matchIndicator');
+// ---------------------------------------------------------------------------
+// Master secret -> key (slow, debounced) -> fingerprint
+// ---------------------------------------------------------------------------
 
-    if (!masterConfirm) {
-        indicator.textContent = '';
-        indicator.className = 'match-indicator';
-    } else if (master === masterConfirm) {
-        indicator.textContent = '\u2713 Match';
-        indicator.className = 'match-indicator match';
-    } else {
-        indicator.textContent = '\u2717 No match';
-        indicator.className = 'match-indicator no-match';
+function onMasterInput() {
+    const master = el.master.value;
+    clearTimeout(state.deriveTimer);
+    if (master !== state.keyFor) {
+        state.masterKey = null;
+        state.keyFor = null;
     }
+    renderMasterStrength();
+    if (master && !state.masterKey) state.deriveTimer = setTimeout(startDerive, DERIVE_DELAY_MS);
+    renderFingerprint();
+    regenerate();
 }
 
-// My Sites functionality
-function getSavedSites() {
+async function startDerive() {
+    clearTimeout(state.deriveTimer);
+    const master = el.master.value;
+    if (!master || master === state.keyFor || master === state.deriving) return;
+    state.deriving = master;
+    renderFingerprint();
+    renderResult();
+    let key;
     try {
-        var data = JSON.parse(localStorage.getItem('mySites') || '[]');
-        return data.map(function (site) {
-            if (typeof site === 'string') {
-                return { name: site, length: 20, lowercase: true, uppercase: true, numbers: true, symbols: true };
-            }
-            return site;
-        }).filter(function (site) { return site && site.name; });
-    } catch (e) {
-        return [];
-    }
-}
-
-// Clean up invalid data on load
-(function () {
-    var sites = getSavedSites();
-    localStorage.setItem('mySites', JSON.stringify(sites));
-})();
-
-function getCurrentSettings() {
-    return {
-        length: parseInt(document.getElementById('length').value) || 20,
-        lowercase: document.getElementById('lowercase').checked,
-        uppercase: document.getElementById('uppercase').checked,
-        numbers: document.getElementById('numbers').checked,
-        symbols: document.getElementById('symbols').checked
-    };
-}
-
-function toggleSaveSite() {
-    var siteName = normalizeSite(document.getElementById('site').value);
-    if (!siteName) {
-        alert('Please enter a site name first');
+        key = await deriveMasterKey(master);
+    } catch {
+        if (state.deriving === master) state.deriving = null;
+        renderFingerprint();
+        toast('Could not derive the key. This page needs HTTPS and a modern browser.');
         return;
     }
-
-    var sites = getSavedSites();
-    var existingIndex = sites.findIndex(function (s) { return s.name === siteName; });
-    var starBtn = document.getElementById('starBtn');
-    var isOutOfSync = starBtn.classList.contains('out-of-sync');
-
-    if (existingIndex >= 0) {
-        if (isOutOfSync) {
-            sites[existingIndex] = Object.assign({ name: siteName }, getCurrentSettings());
-        } else {
-            sites.splice(existingIndex, 1);
-        }
-    } else {
-        sites.unshift(Object.assign({ name: siteName }, getCurrentSettings()));
-        if (sites.length > 50) sites.pop();
-    }
-
-    localStorage.setItem('mySites', JSON.stringify(sites));
-    renderSitesList();
-    updateStarButton();
+    if (state.deriving === master) state.deriving = null;
+    if (el.master.value !== master) return; // typed on meanwhile; a newer derive is scheduled
+    state.masterKey = key;
+    state.keyFor = master;
+    const icons = await fingerprint(key);
+    if (state.keyFor !== master) return;
+    renderFingerprint(icons);
+    regenerate();
 }
 
-function settingsMatch(saved, current) {
-    return saved.length === current.length &&
-        saved.lowercase === current.lowercase &&
-        saved.uppercase === current.uppercase &&
-        saved.numbers === current.numbers &&
-        saved.symbols === current.symbols;
+function renderFingerprint(icons) {
+    const master = el.master.value;
+    el.fingerprint.hidden = !master;
+    el.lockBtn.hidden = !master;
+    if (!master) {
+        el.fingerprintStatus.textContent = '';
+        return;
+    }
+    const busy = !state.masterKey;
+    el.fpSpinner.hidden = !busy || state.deriving !== master;
+    if (icons) {
+        el.fpIcons.textContent = icons.map(([emoji]) => emoji).join('');
+        el.fpIcons.classList.remove('pending');
+        el.fingerprintStatus.textContent = `Fingerprint: ${icons.map(([, name]) => name).join(', ')}`;
+    } else if (busy) {
+        el.fpIcons.textContent = '•••';
+        el.fpIcons.classList.add('pending');
+        el.fingerprintStatus.textContent = state.deriving === master ? 'Deriving key' : '';
+    }
 }
 
-function updateStarButton() {
-    var siteName = normalizeSite(document.getElementById('site').value);
-    var sites = getSavedSites();
-    var savedSite = sites.find(function (s) { return s.name === siteName; });
+function renderMasterStrength() {
+    const master = el.master.value;
+    el.masterMeter.hidden = !master;
+    el.masterStrength.hidden = !master;
+    if (!master) return;
+    const { level, label, tip } = estimateMasterStrength(master);
+    el.masterMeter.className = `meter-track thin level-${level}`;
+    el.masterMeterFill.style.width = `${level * 25}%`;
+    el.masterStrengthLabel.textContent = label;
+    el.masterStrengthLabel.className = `text-level-${level}`;
+    el.masterStrengthTip.textContent = tip;
+}
 
-    var starBtn = document.getElementById('starBtn');
-    var starOutline = document.getElementById('star-outline');
-    var starFilled = document.getElementById('star-filled');
+function setMasterVisible(visible) {
+    el.master.type = visible ? 'text' : 'password';
+    el.revealMaster.setAttribute('aria-pressed', String(visible));
+    el.revealMaster.setAttribute('aria-label', visible ? 'Hide master secret' : 'Show master secret');
+}
 
-    if (savedSite && siteName) {
-        var currentSettings = getCurrentSettings();
-        var isInSync = settingsMatch(savedSite, currentSettings);
+// ---------------------------------------------------------------------------
+// Password generation (instant once the master key exists)
+// ---------------------------------------------------------------------------
 
-        starBtn.classList.add('saved');
-        starOutline.style.display = 'none';
-        starFilled.style.display = 'block';
-
-        if (isInSync) {
-            starBtn.classList.remove('out-of-sync');
-            starBtn.setAttribute('aria-label', 'Remove saved site');
-            starBtn.setAttribute('title', 'Click to remove from saved sites');
-        } else {
-            starBtn.classList.add('out-of-sync');
-            starBtn.setAttribute('aria-label', 'Update saved site settings');
-            starBtn.setAttribute('title', 'Settings changed - click to update');
-        }
-    } else {
-        starBtn.classList.remove('saved', 'out-of-sync');
-        starOutline.style.display = 'block';
-        starFilled.style.display = 'none';
-        starBtn.setAttribute('aria-label', 'Save site');
-        starBtn.setAttribute('title', 'Click to save site with current settings');
+async function regenerate() {
+    const seq = ++state.genSeq;
+    const site = normalizeSite(el.site.value);
+    const settings = readSettings();
+    const keyReady = state.masterKey && state.keyFor === el.master.value;
+    if (!keyReady || !site) {
+        state.result = null;
+        renderResult();
+        return;
     }
+    let password;
+    try {
+        password = await generatePassword(state.masterKey, site, settings);
+    } catch {
+        password = null;
+    }
+    if (seq !== state.genSeq) return; // inputs changed while computing
+    if (password === null) {
+        state.result = null;
+        renderResult();
+        toast('Something went wrong generating the password.');
+        return;
+    }
+    state.result = { seq, password, site, settings };
+    renderResult();
+}
+
+function renderResult() {
+    const r = state.result && state.result.seq === state.genSeq ? state.result : null;
+    const master = el.master.value;
+    const site = normalizeSite(el.site.value);
+
+    renderPassword(r);
+    el.password.className = `password ${state.showPassword ? 'revealed' : 'masked'}`;
+    el.password.setAttribute('aria-label', r && !state.showPassword ? 'Password hidden' : 'Password');
+    el.revealPassword.hidden = !r;
+    el.copyBtn.disabled = !r;
+    el.resultFor.textContent = r ? `for ${r.settings.login ? r.settings.login + ' @ ' : ''}${r.site}${r.settings.counter > 1 ? ` (v${r.settings.counter})` : ''}` : '';
+
+    el.resultStatus.replaceChildren();
+    if (!r) {
+        let message;
+        if (!master) message = 'Enter your master secret to begin.';
+        else if (!state.masterKey) message = state.deriving === master ? 'Deriving your key (one time per session)…' : 'Waiting for you to finish typing…';
+        else if (!site) message = 'Enter a site to see its password.';
+        else message = 'Updating…';
+        if (state.deriving === master && master) {
+            const spin = document.createElement('span');
+            spin.className = 'spinner';
+            el.resultStatus.append(spin);
+        }
+        el.resultStatus.append(message);
+    }
+    renderEntropy();
+}
+
+/** Masked as dots; revealed as one line with digits and symbols coloured. */
+function renderPassword(r) {
+    if (!r || !state.showPassword) {
+        el.password.textContent = r ? '•'.repeat(r.password.length) : '';
+        return;
+    }
+    // Consecutive characters of the same kind share one span.
+    const runs = [];
+    for (const ch of r.password) {
+        const kind = /[0-9]/.test(ch) ? 'd' : /[a-zA-Z]/.test(ch) ? '' : 's';
+        const last = runs[runs.length - 1];
+        if (last && last.kind === kind) last.text += ch;
+        else runs.push({ kind, text: ch });
+    }
+    el.password.replaceChildren(...runs.map(({ kind, text }) => {
+        if (!kind) return document.createTextNode(text);
+        const span = document.createElement('span');
+        span.className = kind;
+        span.textContent = text;
+        return span;
+    }));
+}
+
+function renderEntropy() {
+    const bits = passwordEntropy(readSettings());
+    let level, label;
+    if (bits < 40) [level, label] = [1, 'Weak'];
+    else if (bits < 64) [level, label] = [2, 'Fair'];
+    else if (bits < 100) [level, label] = [3, 'Good'];
+    else [level, label] = [4, 'Strong'];
+    const pct = Math.min(100, Math.round((bits / 128) * 100));
+    el.entropyMeter.className = `meter-track level-${level}`;
+    el.entropyFill.style.width = `${Math.max(pct, 4)}%`;
+    el.entropyMeter.setAttribute('aria-valuenow', String(pct));
+    el.entropyMeter.setAttribute('aria-valuetext', `${bits} bits, ${label}`);
+    el.entropyBits.textContent = `${bits} bits`;
+    el.entropyLabel.textContent = label;
+    el.entropyLabel.className = `text-level-${level}`;
+}
+
+// ---------------------------------------------------------------------------
+// Copy + clipboard hygiene
+// ---------------------------------------------------------------------------
+
+async function writeClipboard(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+        return true;
+    } catch {
+        // Fallback for older browsers / non-secure contexts.
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.setAttribute('readonly', '');
+        area.className = 'visually-hidden';
+        document.body.append(area);
+        area.select();
+        try { return document.execCommand('copy'); } catch { return false; } finally { area.remove(); }
+    }
+}
+
+let copyResetTimer = 0;
+
+async function copyPassword() {
+    const r = state.result;
+    if (!r || r.seq !== state.genSeq) return;
+    const ok = await writeClipboard(r.password);
+    clearTimeout(copyResetTimer);
+    el.copyBtn.textContent = ok ? 'Copied ✓' : 'Copy failed';
+    el.copyBtn.classList.toggle('copied', ok);
+    copyResetTimer = setTimeout(() => {
+        el.copyBtn.textContent = 'Copy password';
+        el.copyBtn.classList.remove('copied');
+    }, 1800);
+    if (!ok) {
+        toast('Could not copy. Reveal the password and copy it manually.');
+        return;
+    }
+    touchSite(r.site, r.settings.login);
+    scheduleClipboardClear();
+}
+
+function scheduleClipboardClear() {
+    clearTimeout(state.clipboardTimer);
+    state.clipboardPending = false;
+    if (!state.prefs.clearClipboard) return;
+    state.clipboardTimer = setTimeout(() => {
+        // Browsers only allow clipboard writes while the page has focus.
+        if (document.hasFocus()) clearClipboard();
+        else state.clipboardPending = true;
+    }, CLIPBOARD_CLEAR_MS);
+}
+
+let clipboardClearWarned = false;
+
+async function clearClipboard() {
+    state.clipboardPending = false;
+    try {
+        await navigator.clipboard.writeText('');
+        toast('Clipboard cleared.');
+    } catch {
+        // Some browsers (e.g. Safari, Firefox) only allow clipboard writes right after a click.
+        if (!clipboardClearWarned) {
+            clipboardClearWarned = true;
+            toast('This browser does not let pages clear the clipboard. Clear it yourself if needed.', { duration: 6000 });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lock (forget master secret) + inactivity timer
+// ---------------------------------------------------------------------------
+
+function lock(reason) {
+    clearTimeout(state.deriveTimer);
+    el.master.value = '';
+    state.masterKey = null;
+    state.keyFor = null;
+    state.deriving = null;
+    state.result = null;
+    state.showPassword = false;
+    el.revealPassword.setAttribute('aria-pressed', 'false');
+    setMasterVisible(false);
+    renderMasterStrength();
+    renderFingerprint();
+    regenerate();
+    if (reason) toast(reason);
+}
+
+function markActivity() { state.lastActivity = Date.now(); }
+
+function checkIdle() {
+    if (state.prefs.autoLock && el.master.value && Date.now() - state.lastActivity > AUTO_LOCK_MS) {
+        lock('Locked after 5 minutes of inactivity.');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Saved sites
+// ---------------------------------------------------------------------------
+
+const siteId = (s) => `${s.name}\n${s.login}`;
+
+function cleanSite(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const name = normalizeSite(raw.name);
+    if (!name) return null;
+    return { name, ...sanitizeSettings(raw), usedAt: Number(raw.usedAt) || 0 };
+}
+
+function loadSites() {
+    let list = storage.getJSON(SITES_KEY, null);
+    if (!Array.isArray(list)) {
+        // One-time import of the v1 list (names and options; v2 passwords differ anyway).
+        const old = storage.getJSON('mySites', []);
+        list = Array.isArray(old) ? old.map((o) => (typeof o === 'string' ? { name: o } : { ...o, digits: o?.numbers })) : [];
+    }
+    const byId = new Map();
+    for (const s of list.map(cleanSite).filter(Boolean)) if (!byId.has(siteId(s))) byId.set(siteId(s), s);
+    state.sites = [...byId.values()];
+    if (storage.getRaw(SITES_KEY) === null && state.sites.length) saveSites();
+}
+
+function saveSites() {
+    if (!storage.setJSON(SITES_KEY, state.sites)) toast('Could not save: browser storage is unavailable.');
+}
+
+function sortedSites() {
+    return [...state.sites].sort((a, b) => b.usedAt - a.usedAt || a.name.localeCompare(b.name));
+}
+
+const findSaved = (name, login) => state.sites.find((s) => s.name === name && s.login === login);
+const bestByName = (name) => sortedSites().find((s) => s.name === name);
+
+function touchSite(name, login) {
+    const s = findSaved(name, login);
+    if (!s) return;
+    s.usedAt = Date.now();
+    saveSites();
+    renderSites();
+}
+
+let persistRequested = false;
+function requestPersistence() {
+    if (persistRequested) return;
+    persistRequested = true;
+    navigator.storage?.persist?.().catch(() => {});
+}
+
+function upsertSite(site) {
+    const i = state.sites.findIndex((s) => siteId(s) === siteId(site));
+    if (i >= 0) state.sites[i] = site; else state.sites.push(site);
+    saveSites();
+    requestPersistence();
+}
+
+function removeSite(site) {
+    state.sites = state.sites.filter((s) => siteId(s) !== siteId(site));
+    saveSites();
+    renderSites();
+    renderSiteState();
+    toast(`Removed ${site.name}`, {
+        action: 'Undo',
+        duration: 7000,
+        onAction: () => { upsertSite(site); renderSites(); renderSiteState(); }
+    });
+}
+
+function onSaveClick() {
+    const name = normalizeSite(el.site.value);
+    if (!name) {
+        toast('Enter a site first.');
+        el.site.focus();
+        return;
+    }
+    const current = readSettings();
+    const existing = findSaved(name, current.login);
+    if (existing && settingsEqual(existing, current)) {
+        removeSite(existing);
+        return;
+    }
+    upsertSite({ name, ...current, usedAt: Date.now() });
+    el.site.value = name;
+    state.lastSite = name;
+    state.autoApplied = null;
+    renderSites();
+    renderSiteState();
+    toast(existing ? `Updated ${name}` : `Saved ${name}`);
 }
 
 function selectSite(site) {
-    document.getElementById('site').value = site.name;
-    document.getElementById('length').value = site.length || 20;
-    document.getElementById('lowercase').checked = site.lowercase !== false;
-    document.getElementById('uppercase').checked = site.uppercase !== false;
-    document.getElementById('numbers').checked = site.numbers !== false;
-    document.getElementById('symbols').checked = site.symbols !== false;
-
-    updateEntropy();
-    updateStarButton();
-    document.getElementById('master').focus();
+    el.site.value = site.name;
+    state.lastSite = site.name;
+    state.autoApplied = null;
+    state.settingsTouched = false;
+    writeSettings(site);
+    onSettingsChanged({ touched: false });
+    el.form.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    (el.master.value ? el.copyBtn : el.master).focus({ preventScroll: true });
 }
 
-function toggleMySites() {
-    document.getElementById('mySites').classList.toggle('open');
+function renderSites() {
+    const sites = sortedSites();
+    el.sitesCount.textContent = sites.length;
+    el.sitesEmpty.hidden = sites.length > 0;
+    el.sitesFilter.hidden = sites.length < 6;
+    el.exportBtn.disabled = sites.length === 0;
+
+    const q = el.sitesFilter.hidden ? '' : el.sitesFilter.value.trim().toLowerCase();
+    const shown = q ? sites.filter((s) => s.name.includes(q) || s.login.includes(q)) : sites;
+
+    el.sitesList.replaceChildren(...shown.map((site) => {
+        const li = document.createElement('li');
+        li.className = 'site-row';
+
+        const main = document.createElement('button');
+        main.type = 'button';
+        main.className = 'site-main';
+        const name = document.createElement('span');
+        name.className = 'site-name';
+        name.textContent = site.name;
+        const meta = document.createElement('span');
+        meta.className = 'site-meta';
+        meta.textContent = describeSettings(site);
+        main.append(name, meta);
+        main.addEventListener('click', () => selectSite(site));
+
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'icon-btn small site-del';
+        del.setAttribute('aria-label', `Remove ${site.name}${site.login ? ` (${site.login})` : ''}`);
+        del.append(xIcon());
+        del.addEventListener('click', () => removeSite(site));
+
+        li.append(main, del);
+        return li;
+    }));
+    if (q && shown.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'empty-filter';
+        li.textContent = 'No matches.';
+        el.sitesList.append(li);
+    }
+
+    // Suggestions for the site field.
+    const seen = new Set();
+    el.savedSitesList.replaceChildren(...sites.filter((s) => !seen.has(s.name) && seen.add(s.name)).map((s) => {
+        const opt = document.createElement('option');
+        opt.value = s.name;
+        return opt;
+    }));
 }
 
-function formatSettings(site) {
-    var parts = [];
-    parts.push((site.length || 20) + ' chars');
-    var chars = [];
-    if (site.lowercase !== false) chars.push('a-z');
-    if (site.uppercase !== false) chars.push('A-Z');
-    if (site.numbers !== false) chars.push('0-9');
-    if (site.symbols !== false) chars.push('!@#');
-    if (chars.length < 4) parts.push(chars.join(', '));
-    return parts.join(' \u00b7 ');
+function xIcon() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    for (const [k, v] of Object.entries({ width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v);
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', 'M18 6 6 18M6 6l12 12');
+    svg.append(path);
+    return svg;
 }
 
-function escapeHtml(str) {
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+/** Star state, "settings differ" notice, and the hint under the site field. */
+function renderSiteState() {
+    const raw = el.site.value.trim();
+    const name = normalizeSite(raw);
+    const current = readSettings();
+    const saved = name ? findSaved(name, current.login) : null;
+    const inSync = saved && settingsEqual(saved, current);
+
+    el.saveBtn.setAttribute('aria-pressed', String(Boolean(saved)));
+    el.saveBtn.classList.toggle('out-of-sync', Boolean(saved) && !inSync);
+    const label = !saved ? 'Save this site and its settings' : inSync ? 'Remove saved site' : 'Update saved settings';
+    el.saveBtn.setAttribute('aria-label', label);
+    el.saveBtn.title = label;
+    el.syncNotice.hidden = !saved || inSync;
+
+    const hints = [];
+    if (name && name !== raw.toLowerCase().replace(/\s+/g, ' ')) hints.push(`Using “${name}”`);
+    if (state.autoApplied && !state.settingsTouched) hints.push('Saved settings loaded');
+    el.siteHint.textContent = hints.join(' · ');
 }
 
-function renderSitesList() {
-    var sites = getSavedSites();
-    var list = document.getElementById('sitesList');
-    var count = document.getElementById('sitesCount');
+function onSiteInput() {
+    const name = normalizeSite(el.site.value);
+    if (name !== state.lastSite) {
+        // Leaving a site whose saved settings were auto-loaded: put back what was there before.
+        if (state.autoApplied && !state.settingsTouched) writeSettings(state.autoApplied.previous);
+        state.autoApplied = null;
+        state.settingsTouched = false;
+        const saved = name ? bestByName(name) : null;
+        if (saved) {
+            state.autoApplied = { previous: readSettings() };
+            writeSettings(saved);
+        }
+        state.lastSite = name;
+    }
+    onSettingsChanged({ touched: false });
+}
 
-    count.textContent = sites.length;
+function onSettingsChanged({ touched = true } = {}) {
+    if (touched) state.settingsTouched = true;
+    const s = readSettings();
+    el.lengthRange.value = s.length;
+    el.symbolSet.disabled = !s.symbols;
+    el.optionsSummary.textContent = describeSettings(s);
+    renderSiteState();
+    regenerate();
+}
 
-    if (sites.length === 0) {
-        list.innerHTML = '<div class="my-sites-empty">No saved sites yet. Use the star next to a site name to save it.</div>';
+// ---------------------------------------------------------------------------
+// Export / import
+// ---------------------------------------------------------------------------
+
+function exportSites() {
+    const data = {
+        app: 'passgen',
+        version: 2,
+        exportedAt: new Date().toISOString(),
+        sites: sortedSites().map(({ usedAt, ...s }) => s)
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `passgen-sites-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+async function importSites(file) {
+    if (!file) return;
+    if (file.size > 2_000_000) {
+        toast('That file is too large to be a PassGen backup.');
         return;
     }
-
-    list.innerHTML = sites.map(function (site, index) {
-        if (!site || !site.name) return '';
-        return '<div class="site-item" data-site-index="' + index + '">' +
-            '<div class="site-info">' +
-            '<div class="site-name">' + escapeHtml(site.name) + '</div>' +
-            '<div class="site-settings">' + escapeHtml(formatSettings(site)) + '</div>' +
-            '</div>' +
-            '<button class="site-delete" data-site-index="' + index + '" aria-label="Delete site">' +
-            '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-            '<line x1="18" y1="6" x2="6" y2="18"></line>' +
-            '<line x1="6" y1="6" x2="18" y2="18"></line>' +
-            '</svg>' +
-            '</button>' +
-            '</div>';
-    }).join('');
-}
-
-// Event delegation for sites list
-function handleSiteListClick(e) {
-    var deleteBtn = e.target.closest('.site-delete');
-    if (deleteBtn) {
-        e.stopPropagation();
-        var index = parseInt(deleteBtn.dataset.siteIndex);
-        var sites = getSavedSites();
-        if (index >= 0 && index < sites.length) {
-            sites.splice(index, 1);
-            localStorage.setItem('mySites', JSON.stringify(sites));
-            renderSitesList();
-            updateStarButton();
-        }
+    let list;
+    try {
+        const data = JSON.parse(await file.text());
+        list = Array.isArray(data) ? data : data?.sites;
+        if (!Array.isArray(list)) throw new Error('no sites');
+    } catch {
+        toast('Could not read that file. Is it a PassGen backup?');
         return;
     }
+    let added = 0, updated = 0;
+    for (const site of list.map(cleanSite).filter(Boolean)) {
+        const existing = state.sites.find((s) => siteId(s) === siteId(site));
+        if (existing) {
+            if (!settingsEqual(existing, site)) updated++;
+            site.usedAt = Math.max(existing.usedAt, site.usedAt);
+        } else added++;
+        upsertSite(site);
+    }
+    renderSites();
+    renderSiteState();
+    toast(added || updated ? `Imported: ${added} new, ${updated} updated.` : 'Nothing new to import.');
+}
 
-    var siteItem = e.target.closest('.site-item');
-    if (siteItem) {
-        var idx = parseInt(siteItem.dataset.siteIndex);
-        var allSites = getSavedSites();
-        if (idx >= 0 && idx < allSites.length) {
-            selectSite(allSites[idx]);
-        }
+// ---------------------------------------------------------------------------
+// Theme, prefs, PWA
+// ---------------------------------------------------------------------------
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#fdf8f0' : '#111c26');
+    el.themeToggle.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+}
+
+function toggleTheme() {
+    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    storage.setRaw('theme', next);
+    applyTheme(next);
+}
+
+function loadPrefs() {
+    const saved = storage.getJSON(PREFS_KEY, {});
+    state.prefs = {
+        clearClipboard: saved?.clearClipboard !== false,
+        autoLock: saved?.autoLock !== false
+    };
+    el.prefClearClipboard.checked = state.prefs.clearClipboard;
+    el.prefAutoLock.checked = state.prefs.autoLock;
+}
+
+function onPrefsChanged() {
+    state.prefs = { clearClipboard: el.prefClearClipboard.checked, autoLock: el.prefAutoLock.checked };
+    storage.setJSON(PREFS_KEY, state.prefs);
+    if (!state.prefs.clearClipboard) {
+        clearTimeout(state.clipboardTimer);
+        state.clipboardPending = false;
     }
 }
 
-// PWA Install prompt
-var deferredPrompt;
-window.addEventListener('beforeinstallprompt', function (e) {
-    e.preventDefault();
-    deferredPrompt = e;
-    document.getElementById('installPrompt').style.display = 'block';
-});
+function setupServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloading) return;
+        reloading = true;
+        location.reload();
+    });
+    // The CSP enforces Trusted Types, so the worker URL has to go through a policy.
+    const policy = window.trustedTypes?.createPolicy('passgen', {
+        createScriptURL: (url) => {
+            if (url !== 'sw.js') throw new TypeError(`Blocked script URL: ${url}`);
+            return url;
+        }
+    });
+    navigator.serviceWorker.register(policy ? policy.createScriptURL('sw.js') : 'sw.js').then((reg) => {
+        const offerUpdate = (worker) => toast('A new version is available.', {
+            action: 'Reload', duration: 0, onAction: () => worker.postMessage('skipWaiting')
+        });
+        if (reg.waiting && hadController) offerUpdate(reg.waiting);
+        reg.addEventListener('updatefound', () => {
+            const worker = reg.installing;
+            worker?.addEventListener('statechange', () => {
+                if (worker.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(worker);
+            });
+        });
+    }).catch(() => { /* offline support is optional */ });
+}
 
-function installPWA() {
-    if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then(function (choice) {
-            if (choice.outcome === 'accepted') {
-                document.getElementById('installPrompt').style.display = 'none';
+function setupInstall() {
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        state.installPrompt = e;
+        el.installBtn.hidden = false;
+    });
+    window.addEventListener('appinstalled', () => { el.installBtn.hidden = true; });
+    el.installBtn.addEventListener('click', async () => {
+        const prompt = state.installPrompt;
+        if (!prompt) return;
+        state.installPrompt = null;
+        prompt.prompt();
+        await prompt.userChoice.catch(() => {});
+        el.installBtn.hidden = true;
+    });
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    el.iosHint.hidden = !(isIOS && !navigator.standalone);
+}
+
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+
+function init() {
+    el.appVersion.textContent = VERSION;
+    el.length.min = el.lengthRange.min = LIMITS.minLength;
+    el.length.max = el.lengthRange.max = LIMITS.maxLength;
+    el.counter.min = LIMITS.minCounter;
+    el.counter.max = LIMITS.maxCounter;
+    writeSettings(DEFAULT_SETTINGS);
+
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
+    matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', (e) => {
+        if (storage.getRaw('theme') === null) applyTheme(e.matches ? 'light' : 'dark');
+    });
+    el.themeToggle.addEventListener('click', toggleTheme);
+
+    // Master secret
+    el.master.addEventListener('input', onMasterInput);
+    el.master.addEventListener('blur', () => { if (el.master.value) startDerive(); });
+    el.master.addEventListener('keydown', (e) => {
+        // The copy button is the form's submit button; while it is disabled, Enter
+        // does not submit, so start the (otherwise debounced) derivation here.
+        if (e.key === 'Enter' && el.master.value && !state.masterKey) startDerive();
+    });
+    el.revealMaster.addEventListener('click', () => setMasterVisible(el.master.type === 'password'));
+    el.lockBtn.addEventListener('click', () => { lock('Locked. Master secret cleared.'); el.master.focus(); });
+
+    // Site
+    // Note: the field is deliberately NOT rewritten to the normalized name on blur.
+    // Doing so removes the "Using …" hint, which shifts the layout between
+    // mousedown and mouseup and swallows clicks on the buttons below.
+    el.site.addEventListener('input', onSiteInput);
+    el.saveBtn.addEventListener('click', onSaveClick);
+    el.updateSaved.addEventListener('click', onSaveClick);
+    el.revertSaved.addEventListener('click', () => {
+        const saved = findSaved(normalizeSite(el.site.value), readSettings().login);
+        if (saved) { writeSettings(saved); onSettingsChanged({ touched: false }); }
+    });
+
+    // Options
+    for (const id of ['length', 'symbolSet', 'login', 'counter']) el[id].addEventListener('input', () => onSettingsChanged());
+    el.lengthRange.addEventListener('input', () => { el.length.value = el.lengthRange.value; onSettingsChanged(); });
+    for (const id of ['length', 'counter', 'login']) {
+        el[id].addEventListener('change', () => { writeSettings(readSettings()); onSettingsChanged(); });
+    }
+    for (const id of ['lowercase', 'uppercase', 'digits', 'symbols']) {
+        el[id].addEventListener('change', () => {
+            // At least one character type must stay selected.
+            if (!el.lowercase.checked && !el.uppercase.checked && !el.digits.checked && !el.symbols.checked) {
+                el[id].checked = true;
+                toast('At least one character type is needed.');
             }
-            deferredPrompt = null;
+            onSettingsChanged();
         });
     }
-}
+    const step = (delta) => {
+        el.counter.value = Math.min(LIMITS.maxCounter, Math.max(LIMITS.minCounter, readSettings().counter + delta));
+        onSettingsChanged();
+    };
+    el.counterDec.addEventListener('click', () => step(-1));
+    el.counterInc.addEventListener('click', () => step(1));
+    el.resetOptions.addEventListener('click', () => { writeSettings({ ...DEFAULT_SETTINGS }); onSettingsChanged(); });
 
-// Register Service Worker
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(function () { });
-}
-
-// Wire up all event listeners
-document.querySelector('.theme-toggle').addEventListener('click', toggleTheme);
-document.querySelector('.toggle-btn').addEventListener('click', toggleMaster);
-document.getElementById('starBtn').addEventListener('click', toggleSaveSite);
-document.querySelector('.generate-btn').addEventListener('click', generate);
-document.querySelector('.clear-btn').addEventListener('click', clearAll);
-document.querySelector('.copy-btn').addEventListener('click', copyPassword);
-document.querySelector('.install-btn').addEventListener('click', installPWA);
-document.querySelector('.how-it-works-header').addEventListener('click', toggleHowItWorks);
-document.querySelector('.my-sites-header').addEventListener('click', toggleMySites);
-document.getElementById('sitesList').addEventListener('click', handleSiteListClick);
-
-document.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && e.target.closest('.card')) generate();
-});
-
-document.getElementById('length').addEventListener('input', updateEntropy);
-document.getElementById('length').addEventListener('input', updateStarButton);
-document.getElementById('master').addEventListener('input', updateMasterStrength);
-document.getElementById('master').addEventListener('input', updateMatchIndicator);
-document.getElementById('masterConfirm').addEventListener('input', updateMatchIndicator);
-
-document.getElementById('site').addEventListener('input', updateStarButton);
-document.getElementById('site').addEventListener('blur', function () {
-    this.value = normalizeSite(this.value);
-    updateStarButton();
-});
-
-['lowercase', 'uppercase', 'numbers', 'symbols'].forEach(function (id) {
-    document.getElementById(id).addEventListener('change', function () {
-        var checked = ['lowercase', 'uppercase', 'numbers', 'symbols']
-            .filter(function (i) { return document.getElementById(i).checked; });
-        if (checked.length === 0) this.checked = true;
-        updateEntropy();
-        updateStarButton();
+    // Result
+    el.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (state.result && state.result.seq === state.genSeq) copyPassword();
+        else if (el.master.value && !state.masterKey) startDerive();
+        else if (!normalizeSite(el.site.value)) el.site.focus();
     });
-});
+    el.revealPassword.addEventListener('click', () => {
+        state.showPassword = !state.showPassword;
+        el.revealPassword.setAttribute('aria-pressed', String(state.showPassword));
+        el.revealPassword.setAttribute('aria-label', state.showPassword ? 'Hide password' : 'Show password');
+        renderResult();
+    });
 
-// Initialize on load
-updateEntropy();
-renderSitesList();
-updateStarButton();
+    // Saved sites
+    el.sitesFilter.addEventListener('input', renderSites);
+    el.exportBtn.addEventListener('click', exportSites);
+    el.importBtn.addEventListener('click', () => el.importFile.click());
+    el.importFile.addEventListener('change', async () => {
+        await importSites(el.importFile.files[0]);
+        el.importFile.value = '';
+    });
+    window.addEventListener('storage', (e) => {
+        if (e.key === SITES_KEY) { loadSites(); renderSites(); renderSiteState(); }
+    });
+
+    // Privacy
+    el.prefClearClipboard.addEventListener('change', onPrefsChanged);
+    el.prefAutoLock.addEventListener('change', onPrefsChanged);
+    for (const type of ['pointerdown', 'keydown', 'input']) document.addEventListener(type, markActivity, { passive: true, capture: true });
+    setInterval(checkIdle, 15_000);
+    const onReturn = () => {
+        checkIdle();
+        if (state.clipboardPending && document.hasFocus()) clearClipboard();
+    };
+    window.addEventListener('focus', onReturn);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) onReturn(); });
+
+    loadPrefs();
+    loadSites();
+    renderSites();
+    renderFingerprint();
+    renderMasterStrength();
+    onSettingsChanged({ touched: false });
+    if (state.sites.length) el.sitesPanel.open = true;
+
+    setupInstall();
+    setupServiceWorker();
+}
+
+init();
