@@ -696,6 +696,14 @@ input[type="range"] {
     text-align: center;
 }
 
+.footer a {
+    color: var(--text-2);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.footer a:hover { color: var(--text); }
+
 /* ---------- Toasts ---------- */
 
 .toasts {

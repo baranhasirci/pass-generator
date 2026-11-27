@@ -1,7 +1,7 @@
 // PassGen service worker: cache-first app shell so the app opens instantly and
 // works offline. Bump CACHE on every deploy that changes any file below;
 // users then get a "new version available" prompt.
-const CACHE = 'passgen-v2.0.1';
+const CACHE = 'passgen-v2.0.2';
 const ASSETS = [
     './index.html',
     './styles.css',
